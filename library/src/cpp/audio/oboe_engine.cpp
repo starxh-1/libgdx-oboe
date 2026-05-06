@@ -8,6 +8,14 @@
 #include <limits>
 #include <cassert>
 
+// Detect 32-bit ARM for buffer size adjustment
+// __aarch64__ is defined only for 64-bit ARM, so !__aarch64__ on ARM means 32-bit
+#if defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__)
+    #define IS_LOW_POWER_DEVICE 0
+#else
+    #define IS_LOW_POWER_DEVICE 1
+#endif
+
 namespace {
 /// @note: message should contain {}
 inline bool check(oboe::Result result, std::string_view msg) {
@@ -69,7 +77,12 @@ void oboe_engine::connect_to_device() {
 
     check(builder.openStream(ptrptr(m_stream)), "Error opening stream: {}");
 
-    m_payload_size = m_stream->getFramesPerBurst() * 2;
+    // Calculate buffer multiplier: 4 for 32-bit ARM (lower CPU processing power),
+    // 2 for 64-bit ARM (higher processing power)
+    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
+    m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
+    debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
+          m_stream->getFramesPerBurst(), burst_multiplier, m_payload_size);
     m_stream->setBufferSizeInFrames(static_cast<int32_t>(m_payload_size));
 }
 
