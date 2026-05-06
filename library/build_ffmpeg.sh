@@ -19,7 +19,7 @@ BUILD_ROOT="$(pwd)/build/libs"
 # Consult library/build.gradle for those options
 # android.defaultConfig.ndk.abiFilters
 # ABI_FILTERS="x86_64"
-ABI_FILTERS="x86 x86_64 armeabi-v7a arm64-v8a"
+ABI_FILTERS="armeabi-v7a arm64-v8a"
 # android.defaultConfig.minSdkVersion
 MIN_SDK_VERSION="21"
 
@@ -73,10 +73,11 @@ FFMPEG_FLAGS="
 --enable-protocol=file
 
 --disable-encoders
+--enable-parser=flac
 --enable-libmp3lame
 --enable-libvorbis
---enable-demuxer=wav,ogg,pcm*,mp3
---enable-decoder=vorbis,opus,wav,mp3*,pcm*
+--enable-demuxer=wav,ogg,pcm*,mp3,flac
+--enable-decoder=vorbis,opus,wav,mp3*,pcm*,flac
 "
 # static:
 #--enable-statoc

@@ -10,6 +10,12 @@ dependencies {
     implementation(Dependencies.KOTLIN_STDLIB)
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 android {
     buildToolsVersion = AndroidConfig.BUILD_TOOLS
     compileSdkVersion = "android-${AndroidConfig.SDK}"
@@ -32,7 +38,7 @@ android {
         minSdk = AndroidConfig.MIN_SDK
 
         ndk {
-            abiFilters.addAll(listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a"))
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
 
             externalNativeBuild {
                 cmake {
