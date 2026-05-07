@@ -76,10 +76,10 @@ public:
 
 private:
     void process_band(int b, float avg, std::vector<float>& smoothed, int offset) {
-        // 使用 sqrt 让频谱起伏更自然，增益调为 6.0f (配合 sqrt 后的数值)
-        float val = std::min(1.0f, sqrtf(avg) * 6.5f);
+        // 使用 sqrt 让频谱起伏更自然，增益调为 0.25f
+        float val = std::min(1.0f, sqrtf(avg) * 0.25f);
         if (val > smoothed[b]) smoothed[b] = val;
-        else smoothed[b] = smoothed[b] * 0.88f + val * 0.12f; // 稍微加快下降速度
+        else smoothed[b] = smoothed[b] * 0.65f + val * 0.3f; // 稍微加快下降速度
         m_combined_result[offset + b] = smoothed[b];
     }
 
