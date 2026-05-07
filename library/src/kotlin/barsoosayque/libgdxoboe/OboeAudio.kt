@@ -34,6 +34,19 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
     external override fun resume()
     external override fun pause()
     private external fun disposeEngine()
+    private external fun getAudioSessionId(): Int
+    private external fun getSpectrum(): FloatArray
+
+    fun getAudioSessionIdInternal(): Int {
+        return getAudioSessionId()
+    }
+
+    /**
+     * Get the current audio spectrum magnitudes (32 bands, 0.0 to 1.0)
+     */
+    fun getSpectrumMagnitudes(): FloatArray {
+        return getSpectrum()
+    }
 
     override fun notifyMusicDisposed(music: AndroidMusic?) {
         // No need to do anything here since runtime disposal of music/soundpool is

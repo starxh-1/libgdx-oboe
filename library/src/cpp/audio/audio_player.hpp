@@ -2,6 +2,7 @@
 
 #include "renderable_audio.hpp"
 #include "oboe_engine.hpp"
+#include "spectrum_analyzer.hpp"
 #include <memory>
 #include <vector>
 #include <atomic>
@@ -25,10 +26,17 @@ public:
     /// Resume playing audio.
     void resume() { m_engine.resume(); }
 
+    /// Get audio session ID for Visualizer.
+    int32_t get_audio_session_id() const { return m_engine.get_audio_session_id(); }
+
+    /// Get spectrum data
+    const std::vector<float>& get_spectrum() { return m_analyzer.get_bands(); }
+
 private:
     const std::vector<int16_t>& generate_audio(uint32_t num_frames);
 
     oboe_engine m_engine;
+    spectrum_analyzer m_analyzer;
     float m_volume;
 
     std::vector<int16_t> m_pcm;

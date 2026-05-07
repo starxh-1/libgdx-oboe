@@ -5,6 +5,7 @@
 #include "pan_effect.hpp"
 #include "../utility/executor.hpp"
 #include <atomic>
+#include <cstdint>
 
 /// Native implementation of streaming music.
 /// Uses audio_decoder to render audio in chunks. Load PCM chunks
@@ -36,7 +37,7 @@ public:
     /// Set playback position (invalidates loading progress).
     void position(float position);
     /// Return current playback position.
-    float position() const { return m_position; }
+    float position() const { return m_position.load(std::memory_order_acquire); }
 
     /// Return true if looping.
     bool is_looping() const { return m_looping; }
@@ -48,7 +49,8 @@ public:
 
 public:
     // renderable_audio interface
-    void render(int16_t *stream, uint32_t frames);
+    void render(int16_t *stream, uint32_t frames) override;
+    void sync_timing(uint32_t sample_rate, uint64_t engine_frames) override;
 
 private:
     void fill_second_buffer();
@@ -59,7 +61,8 @@ private:
     pan_effect m_pan;
     bool m_playing{}, m_looping, m_eof{};
     int m_cache_size;
-    float m_position{}, m_volume;
+    std::atomic<float> m_position{0};
+    float m_volume;
     std::function<void()> m_on_complete;
     int8_t m_channels;
     std::unique_ptr<audio_decoder> m_decoder;
@@ -70,4 +73,10 @@ private:
 
     std::atomic_flag m_buffer_swap;
     executor m_executor;
+
+    // Timing synchronization with audio engine
+    std::atomic<uint32_t> m_sample_rate{44100};
+    std::atomic<uint64_t> m_engine_frames_at_sync{0};
+    std::atomic<float> m_position_at_sync{0};
+    std::atomic<bool> m_is_synced{false};
 };

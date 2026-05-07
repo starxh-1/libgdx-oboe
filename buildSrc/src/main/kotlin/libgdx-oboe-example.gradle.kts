@@ -19,6 +19,12 @@ dependencies {
     natives(Dependencies.GDX_NATIVES_X86_64)
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 android {
     buildToolsVersion = AndroidConfig.BUILD_TOOLS
     compileSdkVersion = "android-${AndroidConfig.SDK}"

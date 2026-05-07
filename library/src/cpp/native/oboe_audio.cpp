@@ -132,3 +132,19 @@ OBOEAUDIO_METHOD(void, pause)(JNIEnv *env, jobject self) {
     auto* player = get_or_create_shared_player(env, self);
     player->stop();
 }
+
+OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *env, jobject self) {
+    auto* player = get_or_create_shared_player(env, self);
+    return player->get_audio_session_id();
+}
+
+OBOEAUDIO_METHOD(jfloatArray, getSpectrum)(JNIEnv *env, jobject self) {
+    auto* player = get_or_create_shared_player(env, self);
+    const auto& spectrum = player->get_spectrum();
+
+    jfloatArray result = env->NewFloatArray(spectrum.size());
+    if (result == nullptr) return nullptr;
+
+    env->SetFloatArrayRegion(result, 0, spectrum.size(), spectrum.data());
+    return result;
+}

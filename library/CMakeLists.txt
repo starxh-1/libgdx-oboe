@@ -39,6 +39,7 @@ endforeach()
 
 set(SRC_DIR src/cpp)
 add_library(libgdx-oboe SHARED
+            ${SRC_DIR}/external/kissfft/kiss_fft.c
             ${SRC_DIR}/samplerate/resampler.cpp
             ${SRC_DIR}/mediacodec/audio_decoder.cpp
             ${SRC_DIR}/mediacodec/internal_asset.cpp

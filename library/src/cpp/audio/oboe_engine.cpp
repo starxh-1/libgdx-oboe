@@ -119,6 +119,9 @@ oboe::DataCallbackResult oboe_engine::onAudioReady(oboe::AudioStream *self, void
         }
     }
 
+    // Track frames read for accurate timing
+    m_frames_read += num_frames;
+
     return oboe::DataCallbackResult::Continue;
 }
 
@@ -176,4 +179,15 @@ void oboe_engine::blocking_read(int16_t* buffer, size_t len) {
 
 uint32_t oboe_engine::payload_size() const {
     return m_payload_size * m_channels;
+}
+
+uint64_t oboe_engine::frames_read() const {
+    return m_frames_read;
+}
+
+int32_t oboe_engine::get_audio_session_id() const {
+    if (m_stream) {
+        return m_stream->getSessionId();
+    }
+    return 0;
 }

@@ -38,6 +38,9 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     for (const auto &weak_track : m_tracks) {
         is_dirty |= weak_track.expired();
         if (auto track = weak_track.lock()) {
+            // Sync timing from engine for accurate position tracking
+            track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
+
             std::fill(m_buffer.begin(), m_buffer.end(), 0);
             track->render(m_buffer.data(), num_frames / m_engine.channels());
 
@@ -59,6 +62,8 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     for (auto& pcm_bit : m_pcm) {
         pcm_bit = static_cast<int16_t>(static_cast<float>(pcm_bit) * m_volume);
     }
+
+    m_analyzer.feed(m_pcm.data(), m_pcm.size(), m_engine.channels());
 
     m_rendering_flag.clear(std::memory_order_release);
 
