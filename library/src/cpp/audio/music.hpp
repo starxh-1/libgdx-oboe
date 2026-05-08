@@ -75,7 +75,7 @@ private:
     executor m_executor;
 
     // Timing synchronization with audio engine
-    std::atomic<uint32_t> m_sample_rate{44100};
+    std::atomic<uint32_t> m_sample_rate{48000};
     std::atomic<uint64_t> m_engine_frames_at_sync{0};
     std::atomic<float> m_position_at_sync{0};
     std::atomic<bool> m_is_synced{false};

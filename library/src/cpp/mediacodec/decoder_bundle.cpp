@@ -92,7 +92,7 @@ swr_result create_swr(const codec_context_ptr &codec_ctx, int stream_index) {
     frame_ptr oframe = make_frame();
     // TODO: remove hardcoded channels
     oframe->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
-    oframe->sample_rate = 44100;
+    oframe->sample_rate = 48000;
     oframe->format = AV_SAMPLE_FMT_S16;
 
     debug("audio_decoder: oframe config:\nsample_rate: {}\nformat: {}\nchannels: {}",

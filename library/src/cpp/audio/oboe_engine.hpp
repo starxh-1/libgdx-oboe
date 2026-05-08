@@ -20,7 +20,7 @@ public:
     };
 public:
     /// Opening audio stream with specified number of channels and sample rate
-    oboe_engine(mode mode, uint8_t = 2, uint32_t = 44100);
+    oboe_engine(mode mode, uint8_t = 2, uint32_t = 48000);
 
     /// Closing audio stream
     ~oboe_engine();
