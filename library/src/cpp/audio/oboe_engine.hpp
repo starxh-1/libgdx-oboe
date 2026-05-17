@@ -67,7 +67,7 @@ private:
 private:
     void connect_to_device();
 
-    std::unique_ptr<oboe::AudioStream> m_stream;
+    std::shared_ptr<oboe::AudioStream> m_stream;
     mode m_mode;
 
     on_async_write_t m_on_async_write;

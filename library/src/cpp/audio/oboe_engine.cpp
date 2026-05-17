@@ -1,5 +1,4 @@
 #include "oboe_engine.hpp"
-#include "../utility/ptrptr.hpp"
 #include "../utility/log.hpp"
 #include "../utility/exception.hpp"
 #include <array>
@@ -47,35 +46,62 @@ oboe_engine::~oboe_engine() {
 }
 
 void oboe_engine::connect_to_device() {
-    // initialize Oboe audio stream
-    oboe::AudioStreamBuilder builder;
-    builder.setChannelCount(m_channels);
-    builder.setSampleRate(static_cast<int32_t>(m_sample_rate));
-    builder.setErrorCallback(this);
-    builder.setFormat(oboe::AudioFormat::I16);
-    builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
-    builder.setSharingMode(oboe::SharingMode::Exclusive);
-    builder.setFormatConversionAllowed(true);
+    auto create_builder = [this](oboe::SharingMode sharing_mode) {
+        oboe::AudioStreamBuilder builder;
+        builder.setChannelCount(m_channels);
+        builder.setSampleRate(static_cast<int32_t>(m_sample_rate));
+        builder.setErrorCallback(this);
+        builder.setFormat(oboe::AudioFormat::I16);
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+        builder.setSharingMode(sharing_mode);
+        builder.setFormatConversionAllowed(true);
+        builder.setUsage(oboe::Usage::Game);
 
-    builder.setUsage(oboe::Usage::Game);
-    switch(m_mode) {
-        case mode::async_writing:
-        case mode::writing: {
-            builder.setContentType(oboe::ContentType::Music);
-            builder.setDirection(oboe::Direction::Output);
+        switch(m_mode) {
+            case mode::async_writing:
+            case mode::writing: {
+                builder.setContentType(oboe::ContentType::Music);
+                builder.setDirection(oboe::Direction::Output);
+                if (m_mode == mode::async_writing)
+                    builder.setDataCallback(this);
+            }
+            break;
+            case mode::reading: {
+                builder.setDirection(oboe::Direction::Input);
+                builder.setInputPreset(oboe::InputPreset::Generic);
+            }
+            break;
+        }
+        return builder;
+    };
 
-            if (m_mode == mode::async_writing)
-                builder.setDataCallback(this);
+    // Try Exclusive mode first
+    oboe::AudioStreamBuilder builder = create_builder(oboe::SharingMode::Exclusive);
+    oboe::Result result = builder.openStream(m_stream);
+
+    // Fallback to Shared mode if Exclusive fails or opens in Disconnected state (common on some ROMs)
+    if (result != oboe::Result::OK || m_stream->getState() == oboe::StreamState::Disconnected) {
+        if (result != oboe::Result::OK) {
+            warn("Exclusive mode openStream failed ({}), falling back to Shared mode", oboe::convertToText(result));
+        } else {
+            warn("Stream opened in Disconnected state, retrying with Shared mode");
         }
-        break;
-        case mode::reading: {
-            builder.setDirection(oboe::Direction::Input);
-            builder.setInputPreset(oboe::InputPreset::Generic);
-        }
-        break;
+
+        builder = create_builder(oboe::SharingMode::Shared);
+        result = builder.openStream(m_stream);
     }
 
-    check(builder.openStream(ptrptr(m_stream)), "Error opening stream: {}");
+    if (!check(result, "Error opening stream: {}")) {
+        m_stream.reset();
+        return;
+    }
+
+    // Double check if stream is actually open
+    if (m_stream->getState() == oboe::StreamState::Disconnected) {
+        warn("Stream is still Disconnected after Shared mode fallback");
+        // On some extreme cases (e.g. Android 15 with specific background restrictions),
+        // we might need to retry or just log it.
+    }
 
     // Calculate buffer multiplier: 4 for 32-bit ARM (lower CPU processing power),
     // 2 for 64-bit ARM (higher processing power)
@@ -90,7 +116,7 @@ void oboe_engine::onErrorAfterClose(oboe::AudioStream *self, oboe::Result error)
     if (error == oboe::Result::ErrorDisconnected) {
         info("Previous device disconnected. Trying to connect to a new one...");
         connect_to_device();
-        if (m_is_playing) {
+        if (m_is_playing && m_stream) {
             resume();
         }
     }
@@ -155,8 +181,8 @@ void oboe_engine::blocking_write(const int16_t* pcm, size_t len) {
         return;
 
     int32_t len_in_frames = static_cast<int32_t>(len) / m_channels;
-    auto frames = m_stream->write(pcm, len_in_frames, std::numeric_limits<int64_t>::max());
-    check(frames, "Error while reading stream: {}");
+    auto result = m_stream->write(pcm, len_in_frames, std::numeric_limits<int64_t>::max());
+    check(result, "Error while reading stream: {}");
 }
 
 void oboe_engine::blocking_read(int16_t* buffer, size_t len) {
@@ -167,11 +193,11 @@ void oboe_engine::blocking_read(int16_t* buffer, size_t len) {
         return;
 
     int32_t len_in_frames = static_cast<int32_t>(len) / m_channels;
-    auto frames = m_stream->read(buffer, len_in_frames, std::numeric_limits<int64_t>::max());
+    auto result = m_stream->read(buffer, len_in_frames, std::numeric_limits<int64_t>::max());
 
-    check(frames, "Error while writing into stream: {}");
-    if (frames && frames.value() < len_in_frames) {
-        std::fill(std::next(buffer, frames.value() * m_channels),
+    check(result, "Error while writing into stream: {}");
+    if (result && result.value() < len_in_frames) {
+        std::fill(std::next(buffer, result.value() * m_channels),
                   std::next(buffer, static_cast<int32_t>(len)),
                   0);
     }
