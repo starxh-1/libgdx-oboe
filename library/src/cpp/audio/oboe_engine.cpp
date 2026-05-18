@@ -105,8 +105,9 @@ void oboe_engine::connect_to_device() {
          m_stream->getSharingMode() == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared",
          oboe::convertToText(m_stream->getState()));
 
-    // multiplier 2 as requested by user
-    int32_t burst_multiplier = 2;
+    // Calculate buffer multiplier: 4 for 32-bit ARM (lower CPU processing power),
+    // 2 for 64-bit ARM (higher processing power)
+    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
     debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
           m_stream->getFramesPerBurst(), burst_multiplier, m_payload_size);
