@@ -10,23 +10,20 @@ int64_t k_limit_up = std::numeric_limits<int16_t>::max();
 
 audio_player::audio_player()
     : m_engine(oboe_engine::mode::async_writing)
-    , m_volume(1.0f)
-    , m_rendering_flag(false) {
+    , m_volume(1.0f) {
     m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
         return generate_audio(num_frames);
     });
 }
 
 void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     m_tracks.emplace_back(audio);
-
-    m_rendering_flag.clear(std::memory_order_release);
 }
 
 const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     m_pcm.clear();
     m_pcm.resize(num_frames, 0);
@@ -64,8 +61,6 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     }
 
     m_analyzer.feed(m_pcm.data(), m_pcm.size(), m_engine.channels());
-
-    m_rendering_flag.clear(std::memory_order_release);
 
     return m_pcm;
 }

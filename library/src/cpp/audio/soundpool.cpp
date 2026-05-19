@@ -8,19 +8,17 @@ soundpool::soundpool(const data_t &pcm, int8_t channels)
         : m_last_id(0)
         , m_frames(pcm.size() / channels)
         , m_channels(channels)
-        , m_pcm(to_float(pcm))
-        , m_rendering_flag(false) { }
+        , m_pcm(to_float(pcm)) { }
 
 void soundpool::do_by_id(long id, const std::function<void(
         std::vector<soundpool::sound>::iterator)> &callback) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     auto iter = std::find_if(m_sounds.begin(), m_sounds.end(), [id](const soundpool::sound &sound) {
         return sound.m_id == id;
     });
     if (iter != m_sounds.end()) {
         callback(iter);
     }
-    m_rendering_flag.clear(std::memory_order_release);
 }
 
 soundpool::sound soundpool::gen_sound(float volume, float pan, float speed, bool loop) {
@@ -37,19 +35,17 @@ soundpool::sound soundpool::gen_sound(float volume, float pan, float speed, bool
 }
 
 long soundpool::play(float volume, float speed, float pan, bool loop) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_sounds.emplace_back(gen_sound(volume, pan, speed, loop));
     long id = m_sounds.back().m_id;
-    m_rendering_flag.clear(std::memory_order_release);
     return id;
 }
 
 void soundpool::pause() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     for (auto &sound : m_sounds) {
         sound.m_paused = true;
     }
-    m_rendering_flag.clear(std::memory_order_release);
 }
 
 void soundpool::pause(long id) {
@@ -57,11 +53,10 @@ void soundpool::pause(long id) {
 }
 
 void soundpool::resume() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     for (auto &sound : m_sounds) {
         sound.m_paused = false;
     }
-    m_rendering_flag.clear(std::memory_order_release);
 }
 
 void soundpool::resume(long id) {
@@ -69,9 +64,8 @@ void soundpool::resume(long id) {
 }
 
 void soundpool::stop() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_sounds.clear();
-    m_rendering_flag.clear(std::memory_order_release);
 }
 
 void soundpool::stop(long id) {
@@ -103,7 +97,7 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
     static int limit_down = std::numeric_limits<int16_t>::min(),
             limit_up = std::numeric_limits<int16_t>::max();
 
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     int prevaluated = 0;
     m_sample_buffer.reserve(num_frames * m_channels + 16);
     for (auto it = m_sounds.begin(); it != m_sounds.end();) {
@@ -137,6 +131,5 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
             it++;
         }
     }
-    m_rendering_flag.clear(std::memory_order_release);
 }
 

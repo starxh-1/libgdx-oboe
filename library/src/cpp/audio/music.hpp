@@ -4,6 +4,7 @@
 #include "renderable_audio.hpp"
 #include "pan_effect.hpp"
 #include "../utility/executor.hpp"
+#include <mutex>
 #include <atomic>
 #include <cstdint>
 
@@ -71,7 +72,7 @@ private:
     std::vector<int16_t> m_main_pcm;
     std::vector<int16_t> m_buffer_pcm;
 
-    std::atomic_flag m_buffer_swap;
+    std::mutex m_mutex;
     executor m_executor;
 
     // Timing synchronization with audio engine

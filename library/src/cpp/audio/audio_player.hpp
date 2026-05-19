@@ -5,7 +5,7 @@
 #include "spectrum_analyzer.hpp"
 #include <memory>
 #include <vector>
-#include <atomic>
+#include <mutex>
 
 /// oboe_engine frontend for playing renderable_audio.
 class audio_player {
@@ -43,5 +43,5 @@ private:
     std::vector<int16_t> m_buffer;
     std::vector<std::weak_ptr<renderable_audio>> m_tracks;
 
-    std::atomic_flag m_rendering_flag;
+    std::mutex m_mutex;
 };

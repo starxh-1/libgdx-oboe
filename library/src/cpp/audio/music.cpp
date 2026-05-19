@@ -10,7 +10,6 @@ music::music(std::unique_ptr<audio_decoder> &&decoder, int8_t channels)
         , m_channels(channels)
         , m_decoder(std::move(decoder))
         , m_current_frame(0)
-        , m_buffer_swap(false)
         , m_executor([&]() { fill_second_buffer(); }) {
     m_main_pcm.reserve(m_cache_size);
     stop();
@@ -43,7 +42,7 @@ void music::stop() {
 }
 
 void music::position(float position) {
-    while (m_buffer_swap.test_and_set(std::memory_order_acquire));
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_executor.wait();
     m_decoder->seek(position);
     m_position.store(position, std::memory_order_release);
@@ -52,7 +51,6 @@ void music::position(float position) {
     fill_second_buffer();
     swap_buffers();
     m_executor.queue();
-    m_buffer_swap.clear(std::memory_order_release);
 }
 
 void music::raw_render(int16_t *stream, uint32_t frames) {
@@ -77,14 +75,17 @@ void music::raw_render(int16_t *stream, uint32_t frames) {
 void music::render(int16_t *stream, uint32_t frames) {
     if (!m_playing)
         return;
-    while (m_buffer_swap.test_and_set(std::memory_order_acquire));
 
-    int32_t frames_in_pcm = m_main_pcm.size() / m_channels;
-    uint32_t frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
-                                            static_cast<int32_t>(frames));
+    uint32_t frames_to_process;
+    int32_t frames_in_pcm;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        frames_in_pcm = m_main_pcm.size() / m_channels;
+        frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
+                                                static_cast<int32_t>(frames));
 
-    raw_render(stream, frames_to_process);
-    m_buffer_swap.clear(std::memory_order_release);
+        raw_render(stream, frames_to_process);
+    }
 
     if (frames_to_process < frames) {
         bool end = m_eof && m_current_frame >= frames_in_pcm;
@@ -98,7 +99,10 @@ void music::render(int16_t *stream, uint32_t frames) {
 
         // wait for buffer in case there was no position reset
         m_executor.wait();
-        swap_buffers();
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            swap_buffers();
+        }
         if (m_playing) {
             if (m_looping && m_decoder->is_eof()) {
                 m_decoder->seek(0);
@@ -107,10 +111,11 @@ void music::render(int16_t *stream, uint32_t frames) {
         }
 
         // render additional pcm to fill full stream
-        while (m_buffer_swap.test_and_set(std::memory_order_acquire));
-        int16_t remain = frames - frames_to_process;
-        raw_render(stream + frames_to_process * m_channels, remain);
-        m_buffer_swap.clear(std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            int16_t remain = frames - frames_to_process;
+            raw_render(stream + frames_to_process * m_channels, remain);
+        }
     }
 }
 

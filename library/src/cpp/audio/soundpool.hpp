@@ -5,7 +5,7 @@
 #include "renderable_audio.hpp"
 #include "../samplerate/resampler.hpp"
 #include <functional>
-#include <atomic>
+#include <mutex>
 
 /// Soundpool native implementation.
 /// Uses fully loaded 16Bit PCM to play infinite number of sounds.
@@ -72,5 +72,5 @@ private:
     int8_t m_channels;
     std::vector<float> m_pcm, m_sample_buffer;
 
-    std::atomic_flag m_rendering_flag;
+    std::mutex m_mutex;
 };
