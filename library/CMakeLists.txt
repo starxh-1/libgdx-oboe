@@ -52,8 +52,7 @@ add_library(libgdx-oboe SHARED
             ${SRC_DIR}/native/oboe_sound.cpp
             ${SRC_DIR}/native/oboe_music.cpp
             ${SRC_DIR}/native/oboe_audio.cpp
-            ${SRC_DIR}/native/oboe_audio_device.cpp
-            ${SRC_DIR}/native/oboe_audio_recorder.cpp)
+            ${SRC_DIR}/native/oboe_audio_device.cpp)
 
 target_link_libraries(libgdx-oboe samplerate android log oboe fmt OpenSLES ${FFMPEG_LIBS})
 target_compile_options(libgdx-oboe PRIVATE -Wall)

@@ -5,7 +5,6 @@ import com.badlogic.gdx.Audio
 import com.badlogic.gdx.Files
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.audio.AudioDevice
-import com.badlogic.gdx.audio.AudioRecorder
 import com.badlogic.gdx.audio.Music
 import com.badlogic.gdx.audio.Sound
 import com.badlogic.gdx.backends.android.AndroidAudio
@@ -29,7 +28,6 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
     private external fun createMusicFromAsset(assetManager: AssetManager, path: String): Long
     private external fun createMusicFromPath(path: String): Long
     private external fun createAudioStream(samplingRate: Int, isMono: Boolean): Long
-    private external fun createAudioRecorder(samplingRate: Int, isMono: Boolean): Long
 
     external override fun resume()
     external override fun pause()
@@ -93,8 +91,6 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
             .let(::OboeAudioDevice)
             .also(disposables::add)
 
-    override fun newAudioRecorder(samplingRate: Int, isMono: Boolean): AudioRecorder =
-        createAudioRecorder(samplingRate, isMono).let(::NativeAudioRecorder)
-            .let(::OboeAudioRecorder)
-            .also(disposables::add)
+    override fun newAudioRecorder(samplingRate: Int, isMono: Boolean): com.badlogic.gdx.audio.AudioRecorder =
+        throw UnsupportedOperationException("Audio recording is not supported")
 }
