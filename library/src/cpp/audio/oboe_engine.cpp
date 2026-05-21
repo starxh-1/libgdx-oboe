@@ -64,7 +64,9 @@ void oboe_engine::connect_to_device() {
         builder.setSampleRate(static_cast<int32_t>(m_sample_rate));
         builder.setErrorCallback(this);
         builder.setFormat(oboe::AudioFormat::I16);
-        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
+        builder.setPerformanceMode(sizeof(void*) == 8
+                ? oboe::PerformanceMode::LowLatency
+                : oboe::PerformanceMode::None);  // 32-bit: disable low latency to avoid overload
         builder.setSharingMode(sharing_mode);
         builder.setAudioApi(api);
         builder.setFormatConversionAllowed(true);
