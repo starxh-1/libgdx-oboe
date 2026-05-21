@@ -1,6 +1,7 @@
 #include "music.hpp"
 #include <iterator>
 #include <cmath>
+#include <chrono>
 
 music::music(std::unique_ptr<audio_decoder> &&decoder, int8_t channels)
         : m_pan(0)
@@ -97,25 +98,23 @@ void music::render(int16_t *stream, uint32_t frames) {
                 m_on_complete();
         }
 
-        // wait for buffer in case there was no position reset
-        m_executor.wait();
-        {
+        // wait for buffer with timeout to prevent deadlock
+        bool buffer_ready = m_executor.wait_for(std::chrono::milliseconds(100));
+
+        if (buffer_ready) {
             std::lock_guard<std::mutex> lock(m_mutex);
             swap_buffers();
-        }
-        if (m_playing) {
-            if (m_looping && m_decoder->is_eof()) {
-                m_decoder->seek(0);
+            if (m_playing) {
+                if (m_looping && m_decoder->is_eof()) {
+                    m_decoder->seek(0);
+                }
+                m_executor.queue();
             }
-            m_executor.queue();
-        }
-
-        // render additional pcm to fill full stream
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
+            // render additional pcm to fill full stream
             int16_t remain = frames - frames_to_process;
             raw_render(stream + frames_to_process * m_channels, remain);
         }
+        // If timeout, just skip - the existing m_main_pcm has remaining data to use
     }
 }
 

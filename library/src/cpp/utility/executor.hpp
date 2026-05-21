@@ -5,15 +5,7 @@
 #include <thread>
 #include <condition_variable>
 #include <functional>
-
-#if defined(__ANDROID__)
-#include <sys/resource.h>
-#include <unistd.h>
-// ANDROID_PRIORITY_AUDIO is -19, used for audio-related threads
-#ifndef ANDROID_PRIORITY_AUDIO
-#define ANDROID_PRIORITY_AUDIO (-19)
-#endif
-#endif
+#include <chrono>
 
 class executor {
 public:
@@ -22,9 +14,7 @@ public:
             , m_done(true) // Start as done
             , m_job(std::move(job))
             , m_worker(&executor::run, this) {
-#if defined(__ANDROID__)
-        setpriority(PRIO_PROCESS, 0, ANDROID_PRIORITY_AUDIO);
-#endif
+        // Note: setpriority removed - caused threading issues on some Android devices
     }
 
     ~executor() {
@@ -49,6 +39,13 @@ public:
     void wait() {
         std::unique_lock<std::mutex> lock(m_mutex);
         m_cond_done.wait(lock, [this] { return m_done.load(); });
+    }
+
+    // Wait with timeout, returns true if done, false if timeout
+    template<typename Rep, typename Period>
+    bool wait_for(const std::chrono::duration<Rep, Period>& timeout) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        return m_cond_done.wait_for(lock, timeout, [this] { return m_done.load(); });
     }
 
 private:
