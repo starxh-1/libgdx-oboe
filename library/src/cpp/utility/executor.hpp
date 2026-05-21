@@ -6,13 +6,22 @@
 #include <condition_variable>
 #include <functional>
 
+#if defined(__ANDROID__)
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
 class executor {
 public:
     executor(std::function<void()> job)
             : m_run(true)
             , m_done(true) // Start as done
             , m_job(std::move(job))
-            , m_worker(&executor::run, this) { }
+            , m_worker(&executor::run, this) {
+#if defined(__ANDROID__)
+        setpriority(PRIO_PROCESS, 0, ANDROID_PRIORITY_AUDIO);
+#endif
+    }
 
     ~executor() {
         m_run.store(false);
