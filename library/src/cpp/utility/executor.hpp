@@ -9,6 +9,10 @@
 #if defined(__ANDROID__)
 #include <sys/resource.h>
 #include <unistd.h>
+// ANDROID_PRIORITY_AUDIO is -19, used for audio-related threads
+#ifndef ANDROID_PRIORITY_AUDIO
+#define ANDROID_PRIORITY_AUDIO (-19)
+#endif
 #endif
 
 class executor {
