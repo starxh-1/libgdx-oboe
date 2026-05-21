@@ -3,6 +3,7 @@
 #include <oboe/Oboe.h>
 #include <vector>
 #include <atomic>
+#include <chrono>
 
 /// Oboe stream wrapper, with comfortable high level methods.
 class oboe_engine : protected oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
@@ -66,6 +67,7 @@ private:
 
 private:
     void connect_to_device();
+    void rebuild_stream();
 
     std::shared_ptr<oboe::AudioStream> m_stream;
     mode m_mode;
@@ -78,4 +80,9 @@ private:
     uint64_t m_frames_read = 0;
 
     bool m_is_playing;
+
+    // Resilience and loop prevention
+    int m_consecutive_errors = 0;
+    bool m_use_opensl_fallback = false;
+    std::chrono::steady_clock::time_point m_last_reconnect_time;
 };

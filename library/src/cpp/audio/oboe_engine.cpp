@@ -6,6 +6,8 @@
 #include <iterator>
 #include <limits>
 #include <cassert>
+#include <sys/system_properties.h>
+#include <stdlib.h>
 
 // Detect 32-bit ARM for buffer size adjustment
 #if defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__)
@@ -23,6 +25,14 @@ inline bool check(oboe::Result result, std::string_view msg) {
     }
     return true;
 }
+
+int get_api_level() {
+    char sdk_version[PROP_VALUE_MAX];
+    if (__system_property_get("ro.build.version.sdk", sdk_version) > 0) {
+        return atoi(sdk_version);
+    }
+    return 0;
+}
 }
 
 oboe_engine::oboe_engine(mode mode, uint8_t channels, uint32_t sample_rate)
@@ -32,7 +42,10 @@ oboe_engine::oboe_engine(mode mode, uint8_t channels, uint32_t sample_rate)
         , m_channels(channels)
         , m_sample_rate(sample_rate)
         , m_payload_size(0)
-        , m_is_playing(false) {
+        , m_is_playing(false)
+        , m_consecutive_errors(0)
+        , m_use_opensl_fallback(false)
+        , m_last_reconnect_time(std::chrono::steady_clock::now()) {
     connect_to_device();
 }
 
@@ -76,6 +89,11 @@ void oboe_engine::connect_to_device() {
     };
 
     auto try_open = [&](oboe::SharingMode sharing, oboe::AudioApi api) -> bool {
+        // If we are in emergency fallback mode, only allow OpenSL ES
+        if (m_use_opensl_fallback && api != oboe::AudioApi::OpenSLES) {
+            return false;
+        }
+
         auto builder = create_builder(sharing, api);
         oboe::Result result = builder.openStream(m_stream);
         if (result == oboe::Result::OK && m_stream && m_stream->getState() != oboe::StreamState::Disconnected) {
@@ -86,32 +104,74 @@ void oboe_engine::connect_to_device() {
         return false;
     };
 
-    // Attempt 1: AAudio Exclusive (Best)
-    if (!try_open(oboe::SharingMode::Exclusive, oboe::AudioApi::AAudio)) {
-        warn("AAudio Exclusive mode failed, trying AAudio Shared...");
-        // Attempt 2: AAudio Shared
-        if (!try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) {
-            warn("AAudio Shared mode failed, falling back to OpenSL ES...");
-            // Attempt 3: OpenSL ES (Most compatible)
-            if (!try_open(oboe::SharingMode::Shared, oboe::AudioApi::OpenSLES)) {
-                error("All audio backend initialization failed!");
-                return;
-            }
+    // --- Loop detection and circuit breaker ---
+    auto now = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_reconnect_time).count();
+
+    if (duration_ms < 1500) { // If reconnecting faster than once every 1.5 seconds
+        m_consecutive_errors++;
+        if (m_consecutive_errors >= 3) {
+            warn("Detected rapid reconnection loop ({} times in {}ms). Triggering OpenSL ES fallback.",
+                 m_consecutive_errors, duration_ms);
+            m_use_opensl_fallback = true;
+        }
+    } else {
+        // Reset counter if enough time has passed without errors
+        m_consecutive_errors = 0;
+    }
+    m_last_reconnect_time = now;
+
+    bool success = false;
+    int api_level = get_api_level();
+
+    // Strategy 1: AAudio (unless fallbacked)
+    if (!m_use_opensl_fallback) {
+        // Android 10 (API 29) specific stability: Shared AAudio is often better than Exclusive
+        if (api_level == 29) {
+            if (try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) success = true;
+            else if (try_open(oboe::SharingMode::Exclusive, oboe::AudioApi::AAudio)) success = true;
+        } else {
+            if (try_open(oboe::SharingMode::Exclusive, oboe::AudioApi::AAudio)) success = true;
+            else if (try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) success = true;
         }
     }
 
-    info("Stream opened: API={}, Sharing={}, State={}",
+    // Strategy 2: OpenSL ES (Universal fallback)
+    if (!success) {
+        if (m_use_opensl_fallback) {
+            info("Using mandatory OpenSL ES fallback to break the loop.");
+        } else {
+            warn("AAudio initialization failed, falling back to OpenSL ES.");
+        }
+
+        if (!try_open(oboe::SharingMode::Shared, oboe::AudioApi::OpenSLES)) {
+            error("FATAL: All audio backend initialization failed!");
+            return;
+        }
+    }
+
+    info("Stream opened: API={}, Sharing={}, State={}, Reconnects={}",
          oboe::convertToText(m_stream->getAudioApi()),
          m_stream->getSharingMode() == oboe::SharingMode::Exclusive ? "Exclusive" : "Shared",
-         oboe::convertToText(m_stream->getState()));
+         oboe::convertToText(m_stream->getState()),
+         m_consecutive_errors);
 
-    // Calculate buffer multiplier: 4 for 32-bit ARM (lower CPU processing power),
-    // 2 for 64-bit ARM (higher processing power)
+    // Calculate buffer multiplier
     int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
     debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
           m_stream->getFramesPerBurst(), burst_multiplier, m_payload_size);
     m_stream->setBufferSizeInFrames(static_cast<int32_t>(m_payload_size));
+}
+
+void oboe_engine::rebuild_stream() {
+    debug("oboe_engine::rebuild_stream called.");
+    stop();
+    if (m_stream) {
+        m_stream->close();
+        m_stream.reset();
+    }
+    connect_to_device();
 }
 
 void oboe_engine::onErrorAfterClose(oboe::AudioStream *self, oboe::Result error) {
@@ -160,21 +220,39 @@ void oboe_engine::resume() {
     oboe::StreamState state = m_stream->getState();
     debug("oboe_engine::resume. Current State: {}", oboe::convertToText(state));
 
-    if (state == oboe::StreamState::Disconnected) {
-        warn("Detected Disconnected state in resume(), reconnecting...");
-        connect_to_device();
-        if (!m_stream) return;
+    // 1. Skip if already starting or started
+    if (state == oboe::StreamState::Starting || state == oboe::StreamState::Started) {
+        return;
     }
 
+    // 2. Handle intermediate/broken states
+    if (state == oboe::StreamState::Disconnected || state == oboe::StreamState::Closed) {
+        warn("Detected {} state in resume(), rebuilding...", oboe::convertToText(state));
+        rebuild_stream();
+        if (!m_stream) return;
+        state = m_stream->getState();
+    }
+
+    // 3. Handle Stopping state (Wait or Reset)
+    if (state == oboe::StreamState::Stopping) {
+        debug("Stream is Stopping, waiting for Stopped state...");
+        auto result = m_stream->waitForStateChange(state, &state, 100 * 1000000); // 100ms
+        if (result != oboe::Result::OK || state == oboe::StreamState::Stopping) {
+            warn("Stream stuck in Stopping. Hard resetting.");
+            rebuild_stream();
+            if (!m_stream) return;
+        }
+    }
+
+    // 4. Final attempt to start
     oboe::Result result = m_stream->requestStart();
     if (result != oboe::Result::OK) {
-        warn("Error starting stream: {}", oboe::convertToText(result));
-        if (result == oboe::Result::ErrorDisconnected) {
-            connect_to_device();
-            if (m_stream) m_stream->requestStart();
-        }
+        warn("Error starting stream: {}. Attempting emergency rebuild.", oboe::convertToText(result));
+        rebuild_stream();
+        if (m_stream) m_stream->requestStart();
     } else {
         m_is_playing = true;
+        // Successful start eventually clears error counter if it stays stable
     }
 }
 
@@ -182,7 +260,14 @@ void oboe_engine::stop() {
     if (!m_stream)
         return;
 
-    debug("oboe_engine::stop. State: {}", oboe::convertToText(m_stream->getState()));
+    oboe::StreamState state = m_stream->getState();
+    debug("oboe_engine::stop. Current State: {}", oboe::convertToText(state));
+
+    if (state == oboe::StreamState::Stopping || state == oboe::StreamState::Stopped) {
+        m_is_playing = false;
+        return;
+    }
+
     if (check(m_stream->requestStop(), "Error stopping stream: {}")) {
         m_is_playing = false;
     }
