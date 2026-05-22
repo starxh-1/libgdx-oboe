@@ -3,6 +3,12 @@
 #include <algorithm>
 #include <limits>
 
+#if defined(__arm__) || defined(__i386__)
+    #define IS_LOW_POWER_DEVICE 1
+#else
+    #define IS_LOW_POWER_DEVICE 0
+#endif
+
 namespace {
 int64_t k_limit_down = std::numeric_limits<int16_t>::min();
 int64_t k_limit_up = std::numeric_limits<int16_t>::max();
@@ -25,11 +31,12 @@ void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
 const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    m_pcm.clear();
-    m_pcm.resize(num_frames, 0);
-    m_buffer.resize(m_pcm.size(), 0);
+    const uint32_t total_samples = num_frames * m_engine.channels();
 
-    int64_t prevaluated = 0;
+    m_pcm.clear();
+    m_pcm.resize(total_samples, 0);
+    m_buffer.resize(total_samples, 0);
+
     bool is_dirty = false;
 
     for (const auto &weak_track : m_tracks) {
@@ -38,13 +45,26 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
             // Sync timing from engine for accurate position tracking
             track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
 
-            std::fill(m_buffer.begin(), m_buffer.end(), 0);
+            std::fill(m_buffer.begin(), m_buffer.begin() + total_samples, 0);
             track->render(m_buffer.data(), num_frames / m_engine.channels());
 
-            for (int i = 0; i < m_pcm.size(); ++i) {
+#if IS_LOW_POWER_DEVICE
+            // 32-bit optimization: use int32_t instead of int64_t for mixing
+            constexpr int32_t limit_down = -32768;
+            constexpr int32_t limit_up = 32767;
+            for (uint32_t i = 0; i < total_samples; ++i) {
+                int32_t mixed = static_cast<int32_t>(m_pcm[i]) + static_cast<int32_t>(m_buffer[i]);
+                if (mixed < limit_down) mixed = limit_down;
+                else if (mixed > limit_up) mixed = limit_up;
+                m_pcm[i] = static_cast<int16_t>(mixed);
+            }
+#else
+            int64_t prevaluated = 0;
+            for (uint32_t i = 0; i < total_samples; ++i) {
                 prevaluated = static_cast<int64_t>(m_pcm[i]) + static_cast<int64_t>(m_buffer[i]);
                 m_pcm[i] = static_cast<int16_t>(std::clamp(prevaluated, k_limit_down, k_limit_up));
             }
+#endif
         }
     }
 
@@ -55,12 +75,25 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
                                       }), m_tracks.end());
     }
 
-
+#if IS_LOW_POWER_DEVICE
+    // 32-bit optimization: use fixed-point volume (fast integer multiply)
+    if (m_volume != 1.0f) {
+        constexpr int32_t VOL_SHIFT = 12;
+        int32_t vol_fixed = static_cast<int32_t>(m_volume * (1 << VOL_SHIFT));
+        for (uint32_t i = 0; i < total_samples; ++i) {
+            int32_t scaled = (static_cast<int32_t>(m_pcm[i]) * vol_fixed) >> VOL_SHIFT;
+            if (scaled < -32768) scaled = -32768;
+            else if (scaled > 32767) scaled = 32767;
+            m_pcm[i] = static_cast<int16_t>(scaled);
+        }
+    }
+#else
     for (auto& pcm_bit : m_pcm) {
         pcm_bit = static_cast<int16_t>(static_cast<float>(pcm_bit) * m_volume);
     }
+#endif
 
-    m_analyzer.feed(m_pcm.data(), m_pcm.size(), m_engine.channels());
+    m_analyzer.feed(m_pcm.data(), total_samples, m_engine.channels());
 
     return m_pcm;
 }

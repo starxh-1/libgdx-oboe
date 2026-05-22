@@ -64,9 +64,7 @@ void oboe_engine::connect_to_device() {
         builder.setSampleRate(static_cast<int32_t>(m_sample_rate));
         builder.setErrorCallback(this);
         builder.setFormat(oboe::AudioFormat::I16);
-        builder.setPerformanceMode(sizeof(void*) == 8
-                ? oboe::PerformanceMode::LowLatency
-                : oboe::PerformanceMode::PowerSaving);  // 32-bit: use PowerSaving to avoid overload
+        builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
         builder.setSharingMode(sharing_mode);
         builder.setAudioApi(api);
         builder.setFormatConversionAllowed(true);
@@ -159,7 +157,7 @@ void oboe_engine::connect_to_device() {
          m_consecutive_errors);
 
     // Calculate buffer multiplier
-    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 16 : 2;
+    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
     debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
           m_stream->getFramesPerBurst(), burst_multiplier, m_payload_size);
