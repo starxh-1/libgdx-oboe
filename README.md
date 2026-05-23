@@ -57,7 +57,7 @@ Here is a table of known goodies and problems for certain features per file form
 |Music playing|⭐|Precise position, starts and pauses exactly when requested.|
 |Music Seek|👌|_WAV_ is precise, no content lost. _OGG_ and _MP3_ is different: bad initial seek, but dropping frames until PTS is equal to desired seek TS. May lose some content if PTS isn't precise enough.|
 |Audio Device|👌|Repetitive writes to audio device might produce audio artifacts (cracks).|
-|Audio Recorder|×||Deleted, no necessary for Rhythm Games
+|Audio Recorder|×||Deleted, no necessary for Rhythm Games|
 
 *⭐ Works well* \
 *👌 It's alright in general but may have corner cases*
