@@ -20,13 +20,13 @@ And if you ever asked yourself *"Why is my libGDX app music is so broken ?"*, th
 - 🏗️ [How to Build][build]
 - 🎺 [Explore Examples][examples]
 
-## Quick example
+## 代码实现
 
 To use the library, you'll have to add it as a dependency and override the default audio engine on android:
 
 ```kotlin
 class AndroidLauncher : AndroidApplication() {
-    // Magic happens here:
+    // 从这里开始:
     override fun createAudio(context: Context, config: AndroidApplicationConfiguration): AndroidAudio =
             OboeAudio(context.assets)
 
@@ -55,7 +55,7 @@ Here is a table of known goodies and problems for certain features per file form
 |-------|-----|-----------|
 |Sounds|⭐|Per-sound soundpools. All features should be working. Although max sounds isn't read from android config, the number is infinite at the moment.
 |Music playing|⭐|Precise position, starts and pauses exactly when requested.|
-|Music Seek|👌|_WAV_ is precise, no content lost. _OGG_ and _MP3_ is different: bad initial seek, but dropping frames until PTS is equal to desired seek TS. May lose some content if PTS isn't precise enough.|
+|Music Seek|👌|_WAV_ is precise, no content lost. _OGG_ and _MP3_ is different: bad initial seek, but dropping frames until PTS is equal to desired seek TS. May lose some content if PTS isn't precise enough. FLAC Supported too but need more test|
 |Audio Device|👌|Repetitive writes to audio device might produce audio artifacts (cracks).|
 |Audio Recorder|×|Deleted, no necessary for Rhythm Games|
 
