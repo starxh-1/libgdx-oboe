@@ -4,11 +4,18 @@
 #include "../samplerate/pcmtypes.hpp"
 #include "../utility/log.hpp"
 
-soundpool::soundpool(const data_t &pcm, int8_t channels)
+soundpool::soundpool(const data_t &pcm, int8_t channels, bool low_memory_mode)
         : m_last_id(0)
         , m_frames(pcm.size() / channels)
         , m_channels(channels)
-        , m_pcm(to_float(pcm)) { }
+        , m_low_memory_mode(low_memory_mode) {
+    if (m_low_memory_mode) {
+        m_pcm_int16 = pcm;
+        debug("soundpool: using low memory mode (int16 storage) for {} frames", m_frames);
+    } else {
+        m_pcm_float = to_float(pcm);
+    }
+}
 
 void soundpool::do_by_id(long id, const std::function<void(
         std::vector<soundpool::sound>::iterator)> &callback) {
@@ -100,13 +107,30 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
     std::lock_guard<std::mutex> lock(m_mutex);
     int prevaluated = 0;
     m_sample_buffer.reserve(num_frames * m_channels + 16);
+    if (m_low_memory_mode) {
+        m_convert_buffer.reserve(num_frames * m_channels * 2 + 16); // Reserve enough for resampler input
+    }
+
     for (auto it = m_sounds.begin(); it != m_sounds.end();) {
         if (!it->m_paused) {
-            auto iter = std::next(m_pcm.cbegin(), it->m_cur_frame * m_channels);
             const int size = std::min(num_frames, m_frames - it->m_cur_frame);
+            int used_frames;
 
-            int used_frames = it->m_resampler.process(iter, m_pcm.cend(), m_sample_buffer.begin(),
-                                                      size);
+            if (m_low_memory_mode) {
+                // Ensure convert buffer is large enough for the input chunk
+                int samples_to_convert = size * m_channels;
+                if (m_convert_buffer.size() < samples_to_convert) {
+                    m_convert_buffer.resize(samples_to_convert);
+                }
+                src_short_to_float_array(m_pcm_int16.data() + it->m_cur_frame * m_channels,
+                                         m_convert_buffer.data(), samples_to_convert);
+
+                used_frames = it->m_resampler.process(m_convert_buffer.data(), size,
+                                                      m_sample_buffer.data(), num_frames);
+            } else {
+                auto iter = std::next(m_pcm_float.cbegin(), it->m_cur_frame * m_channels);
+                used_frames = it->m_resampler.process(&(*iter), size, m_sample_buffer.data(), num_frames);
+            }
 
             auto buffer_iter = m_sample_buffer.begin();
             auto end = std::next(buffer_iter, size * m_channels);
@@ -132,4 +156,3 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
         }
     }
 }
-

@@ -42,6 +42,8 @@ public:
                 std::vector<float>::iterator output,
                 int requested_frames);
 
+    int process(const float* data_in, int input_frames, float* data_out, int requested_frames);
+
 private:
     SRC_DATA m_data;
     src_state_ptr m_state;

@@ -6,7 +6,7 @@
 music::music(std::unique_ptr<audio_decoder> &&decoder, int8_t channels)
         : m_pan(0)
         , m_looping(false)
-        , m_cache_size(16 * 1024 * channels)
+        , m_cache_size((sizeof(void*) == 4 ? 32 : 16) * 1024 * channels)
         , m_volume(1)
         , m_channels(channels)
         , m_decoder(std::move(decoder))
@@ -99,7 +99,8 @@ void music::render(int16_t *stream, uint32_t frames) {
         }
 
         // wait for buffer with timeout to prevent deadlock
-        bool buffer_ready = m_executor.wait_for(std::chrono::milliseconds(100));
+        // 32-bit low memory devices (like APQ8064) get 1000ms to avoid BGM cutoff
+        bool buffer_ready = m_executor.wait_for(std::chrono::milliseconds(sizeof(void*) == 4 ? 1000 : 100));
 
         if (buffer_ready) {
             std::lock_guard<std::mutex> lock(m_mutex);

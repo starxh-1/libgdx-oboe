@@ -8,6 +8,9 @@
 
 extern "C" {
 
+// fun OboeAudio::setLowMemoryModeNative(): Unit
+OBOEAUDIO_METHOD(void, setLowMemoryModeNative)(JNIEnv *, jobject, jboolean);
+
 // fun OboeAudio::createSoundpoolFromPath(): NativeSoundpool
 OBOEAUDIO_METHOD(jlong, createSoundpoolFromPath)(JNIEnv *, jobject, jstring);
 

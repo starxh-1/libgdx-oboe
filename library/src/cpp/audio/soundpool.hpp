@@ -14,7 +14,7 @@ public:
     using data_t = std::vector<int16_t>;
 
     /// Create a new soundpool with provided pcm data and set number of channels.
-    soundpool(const data_t &pcm, int8_t channels);
+    soundpool(const data_t &pcm, int8_t channels, bool low_memory_mode = false);
 
     /// Play an new instance of sound with settings.
     /// @return id on new sound
@@ -70,7 +70,10 @@ private:
 
     uint32_t m_frames;
     int8_t m_channels;
-    std::vector<float> m_pcm, m_sample_buffer;
+    bool m_low_memory_mode;
+    std::vector<int16_t> m_pcm_int16;
+    std::vector<float> m_pcm_float;
+    std::vector<float> m_sample_buffer, m_convert_buffer;
 
     std::mutex m_mutex;
 };
