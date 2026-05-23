@@ -9,7 +9,7 @@
 
 ```bash
 # Clone repository with dependencies
-$ git clone https://gitlab.com/barsoosayque/libgdx-oboe.git --recurse-submodules
+$ git clone https://gitlab.com/barsoosayque/libgdx-oboe.git --recurse-submodules // 他这个在国内扒的速度实在是太慢了，建议还是找其他方法
 $ cd libgdx-oboe
 
 # You should generate a ffmpeg/libavutil/avconfig.h file
@@ -39,7 +39,7 @@ There is no point to use some cross-platform tools to build the library, therefo
 
 ```bash
 $ cd library
-$ sh build_ffmpeg.sh
+$ sh build_ffmpeg.sh (添加了FLAC支持, FLAC Support added)
 ```
 
 Hopefully, this will build you a bunch of new \*.so libs in `build/libs`.
