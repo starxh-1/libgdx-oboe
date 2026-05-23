@@ -11,6 +11,7 @@ Reimplementation of the Audio interface for **libGDX** framework using [Oboe][ob
 
 And if you ever asked yourself *"Why is my libGDX app music is so broken ?"*, then you've come to the right place.
 
+上面这句话说的就是接入oboe之前的oraja，音频一坨shit
 </td>
 </tr></table>
 
