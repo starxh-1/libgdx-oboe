@@ -20,6 +20,12 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
     private val disposables: MutableList<Disposable> = mutableListOf()
 
     init {
+        try {
+            System.loadLibrary("atfork-shim")
+        } catch (e: UnsatisfiedLinkError) {
+            // This is expected on API >= 23 where the shim might not be needed or if it's not found,
+            // but we try to load it anyway for older versions.
+        }
         System.loadLibrary("libgdx-oboe")
     }
 

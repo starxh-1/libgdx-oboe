@@ -38,6 +38,11 @@ foreach(LIB ${FFMPEG_LIBS})
 endforeach()
 
 set(SRC_DIR src/cpp)
+
+# Create a separate shim library to provide __register_atfork for API < 23
+add_library(atfork-shim SHARED ${SRC_DIR}/utility/atfork_shim.cpp)
+target_link_libraries(atfork-shim log)
+
 add_library(libgdx-oboe SHARED
             ${SRC_DIR}/external/kissfft/kiss_fft.c
             ${SRC_DIR}/samplerate/resampler.cpp
