@@ -39,9 +39,11 @@ endforeach()
 
 set(SRC_DIR src/cpp)
 
-# Create a separate shim library to provide __register_atfork for API < 23
-add_library(atfork-shim SHARED ${SRC_DIR}/utility/atfork_shim.cpp)
-target_link_libraries(atfork-shim log)
+# Separate shared library providing __register_atfork for older Android
+add_library(atfork_shim SHARED
+            ${SRC_DIR}/utility/atfork_shim.cpp)
+target_link_options(atfork_shim PRIVATE "-Wl,-z,max-page-size=16384")
+target_link_options(atfork_shim PRIVATE "-Wl,-z,common-page-size=16384")
 
 add_library(libgdx-oboe SHARED
             ${SRC_DIR}/external/kissfft/kiss_fft.c
@@ -59,12 +61,15 @@ add_library(libgdx-oboe SHARED
             ${SRC_DIR}/native/oboe_audio.cpp
             ${SRC_DIR}/native/oboe_audio_device.cpp)
 
-target_link_libraries(libgdx-oboe samplerate android log oboe fmt OpenSLES ${FFMPEG_LIBS})
+target_link_libraries(libgdx-oboe atfork_shim samplerate android log oboe fmt OpenSLES ${FFMPEG_LIBS})
 target_compile_options(libgdx-oboe PRIVATE -Wall)
 target_link_options(libgdx-oboe PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_options(libgdx-oboe PRIVATE "-Wl,-z,common-page-size=16384")
 
 # Strip
+add_custom_command(TARGET atfork_shim POST_BUILD
+        COMMAND "${CMAKE_STRIP}" -g -S -d --strip-debug
+        "$<TARGET_FILE:atfork_shim>")
 add_custom_command(TARGET libgdx-oboe POST_BUILD
         COMMAND "${CMAKE_STRIP}" -g -S -d --strip-debug
         "$<TARGET_FILE:libgdx-oboe>")

@@ -18,7 +18,6 @@
 namespace {
     constexpr std::string_view k_shared_player = "sharedAudioPlayer";
     constexpr uint8_t k_channels = 2;
-    static bool g_low_memory_mode = false;
 }
 
 inline audio_player* get_or_create_shared_player(JNIEnv *env, jobject self) {
@@ -50,7 +49,7 @@ inline jlong createSoundpool(JNIEnv *env, jobject self, std::unique_ptr<audio_de
     auto* player = get_or_create_shared_player(env, self);
     auto buffer = decoder->decode();
     auto ptr = new std::shared_ptr<soundpool>();
-    *ptr = std::make_shared<soundpool>(buffer, k_channels, g_low_memory_mode);
+    *ptr = std::make_shared<soundpool>(buffer, k_channels);
     player->play_audio(*ptr);
     return reinterpret_cast<jlong>(ptr);
 }
@@ -82,11 +81,6 @@ inline std::unique_ptr<audio_decoder> fromPath(JNIEnv *env, jobject self, jstrin
                 throw_exception(error.m_text);
                 return nullptr;
             });
-}
-
-OBOEAUDIO_METHOD(void, setLowMemoryModeNative)(JNIEnv *env, jobject self, jboolean enabled) {
-    g_low_memory_mode = enabled;
-    info("OboeAudio: Low memory mode set to {}", enabled ? "TRUE" : "FALSE");
 }
 
 OBOEAUDIO_METHOD(jlong, createMusicFromAsset)(JNIEnv *env, jobject self, jobject asset_manager,

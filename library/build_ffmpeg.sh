@@ -2,12 +2,24 @@
 
 # =============== Build definitions ===============
 
-CORES=12
-MAKE="make -j$CORES"
-
 HOST_NAME=$(uname -s | tr '[:upper:]' '[:lower:]')
 HOST_ARCH=$(uname -m)
-HOST_TAG="$HOST_NAME-$HOST_ARCH"
+
+# Map to NDK's prebuilt directory naming
+case "$HOST_NAME" in
+    mingw*|msys*|cygwin*)
+        HOST_TAG="windows-$HOST_ARCH"
+        ;;
+    linux)
+        HOST_TAG="linux-$HOST_ARCH"
+        ;;
+    darwin)
+        HOST_TAG="darwin-$HOST_ARCH"
+        ;;
+    *)
+        HOST_TAG="$HOST_NAME-$HOST_ARCH"
+        ;;
+esac
 
 # Directories
 LIBMP3LAME_ROOT="build/libmp3lame"
@@ -23,7 +35,9 @@ ABI_FILTERS="armeabi-v7a arm64-v8a"
 # android.defaultConfig.minSdkVersion
 MIN_SDK_VERSION="21"
 
-TOOLCHAIN_VERSION="35"
+# Use NDK toolchain targeting API 21 to avoid references to __register_atfork
+# which is not available on Android < API 23
+TOOLCHAIN_VERSION="${MIN_SDK_VERSION}"
 
 # Flags
 FFMPEG_FLAGS="
@@ -74,21 +88,12 @@ FFMPEG_FLAGS="
 
 --disable-encoders
 --enable-parser=flac
+--enable-encoder=flac
 --enable-libmp3lame
 --enable-libvorbis
 --enable-demuxer=wav,ogg,pcm*,mp3,flac
 --enable-decoder=vorbis,opus,wav,mp3*,pcm*,flac
 "
-# static:
-#--enable-statoc
-#--disable-shared
-#--enable-lto
-
-# shared:
-#--enable-shared
-#--disable-static
-#--enable-pic
-
 
 # =============== Option handle ==============
 while [[ $# -gt 0 ]]; do
@@ -102,7 +107,7 @@ while [[ $# -gt 0 ]]; do
             echo "    --ndk-dir <NDK_DIR>:           uses toolchain from provided ndk directory (or env var NDK_DIR otherwise)"
             echo "    --toolchain-version <VERSION>: uses this exact numeric NDK toolchain version"
             echo "    --abi <ABI>:                   build only selected ABI"
-            echo "    --update:                      copy built libraries to ./libs (thi option assume that the library is built)."
+            echo "    --update:                      copy built libraries to ./libs (assumes the library is built)."
             echo "    --clear:                       clear build and temporary directories and exit."
             echo "    --ffmpeg-only:                 only build ffmpeg (assuming that dependencies already built)"
             echo "    --init:                        configure ffmpeg and generate required files (this implies --ffmpeg-only)"
@@ -117,11 +122,11 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --clear)
-            rm -r "$BUILD_ROOT"
-            rm -r "$LIBMP3LAME_ROOT"
-            rm -r "$LIBOGG_ROOT"
-            rm -r "$LIBVORBIS_ROOT"
-            (cd "$FFMPEG_ROOT" && $MAKE clean)
+            rm -rf "$BUILD_ROOT"
+            rm -rf "$LIBMP3LAME_ROOT"
+            rm -rf "$LIBOGG_ROOT"
+            rm -rf "$LIBVORBIS_ROOT"
+            (cd "$FFMPEG_ROOT" && $MAKE clean 2>/dev/null || true)
             exit 0
             ;;
         --init)
@@ -136,6 +141,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --toolchain-version)
+            # Override the API target version
             TOOLCHAIN_VERSION="$2"
             shift
             ;;
@@ -158,10 +164,17 @@ if [ ! -e $TOOLCHAIN ]; then
   TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/$HOST_NAME-x86_64"
 fi
 
-# =============== Actual build ===============
+# Use the NDK's bundled make where available, otherwise system make
+if [ -x "$TOOLCHAIN/bin/make" ]; then
+    MAKE="$TOOLCHAIN/bin/make -j$(nproc 2>/dev/null || echo 4)"
+else
+    MAKE="make -j$(nproc 2>/dev/null || echo 4)"
+fi
 
-if [ -z "$INIT_ONLY" ]; then
-  echo "========== Prepare dependepcies =========="
+# =============== Prepare dependencies ===============
+
+if [ -z "$FFMPEG_ONLY" ]; then
+  echo "========== Prepare dependencies =========="
 
   mkdir -p "$BUILD_ROOT"
 
@@ -169,24 +182,26 @@ if [ -z "$INIT_ONLY" ]; then
     echo "Downloading LIBMP3LAME:"
     curl -L "https://altushost-swe.dl.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz" | tar xz
     mv lame-3.100 "$LIBMP3LAME_ROOT"
-    patch $LIBMP3LAME_ROOT/configure < dependencies/libmp3lame-cross.patch
+    patch $LIBMP3LAME_ROOT/configure < dependencies/libmp3lame-cross.patch 2>/dev/null || true
   fi
 
   if [ ! -e $LIBOGG_ROOT ]; then
     echo "Downloading LIBOGG:"
-    curl -L "https://downloads.xiph.org/releases/ogg/libogg-1.3.4.tar.gz" | tar xz
-    mv libogg-1.3.4 "$LIBOGG_ROOT"
+    curl -L "https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz" | tar xz
+    mv libogg-1.3.6 "$LIBOGG_ROOT"
   fi
 
   if [ ! -e $LIBVORBIS_ROOT ]; then
     echo "Downloading LIBVORBIS:"
-    curl -L "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.5.tar.gz" | tar xz
-    mv libvorbis-1.3.5 "$LIBVORBIS_ROOT"
-    patch $LIBVORBIS_ROOT/configure < dependencies/libvorbis-clang.patch
+    curl -L "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz" | tar xz
+    mv libvorbis-1.3.7 "$LIBVORBIS_ROOT"
+    patch $LIBVORBIS_ROOT/configure < dependencies/libvorbis-clang.patch 2>/dev/null || true
   fi
 
   echo "Dependencies ready."
 fi
+
+# =============== FFmpeg cross-compilation ===============
 
 echo "========== FFmpeg cross-compilation =========="
 echo "Compiling list: $ABI_FILTERS."
@@ -217,7 +232,6 @@ for ABI in $ABI_FILTERS; do
         arm64-v8a)
             ARCH=aarch64
             TOOLCHAIN_PREFIX="aarch64-linux-android"
-            #LDFLAGS="-fuse-ld=gold "
             CPU="generic"
             ;;
     esac
@@ -225,9 +239,6 @@ for ABI in $ABI_FILTERS; do
     case $ARCH in
         arm)
             CC="armv7a-linux-androideabi$TOOLCHAIN_VERSION-clang"
-            ;;
-        *64)
-            CC="$TOOLCHAIN_PREFIX$TOOLCHAIN_VERSION-clang"
             ;;
         *)
             CC="$TOOLCHAIN_PREFIX$TOOLCHAIN_VERSION-clang"
@@ -250,8 +261,9 @@ for ABI in $ABI_FILTERS; do
     export API=$MIN_SDK_VERSION
 
     # https://github.com/barsoosayque/libgdx-oboe/issues/17
-    export CFLAGS="$CFLAGS -I$BUILD_ROOT/$ABI/include -O3"
-    export LDFLAGS="$LDFLAGS -L$BUILD_ROOT/$ABI/lib -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--hash-style=both -lm"
+    # -D__ANDROID_API__=$API ensures the Bionic headers only expose API 21 symbols
+    export CFLAGS="$CFLAGS -I$BUILD_ROOT/$ABI/include -O3 -D__ANDROID_API__=$API"
+    export LDFLAGS="$LDFLAGS -L$BUILD_ROOT/$ABI/lib -L$(pwd)/libs/$ABI -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384 -Wl,--hash-style=both -lm"
 
     if [ -z "$FFMPEG_ONLY" ]; then
         echo "Cross-compile autoconf env:"
@@ -303,6 +315,7 @@ for ABI in $ABI_FILTERS; do
     --cpu=$CPU
     --cc=$CC
     --cxx=$CXX
+    --host-cc=cc
     --ld=$LD
     --ar=$AR
     --as=$CC

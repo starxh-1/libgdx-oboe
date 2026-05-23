@@ -20,24 +20,9 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
     private val disposables: MutableList<Disposable> = mutableListOf()
 
     init {
-        try {
-            System.loadLibrary("atfork-shim")
-        } catch (e: UnsatisfiedLinkError) {
-            // This is expected on API >= 23 where the shim might not be needed or if it's not found,
-            // but we try to load it anyway for older versions.
-        }
         System.loadLibrary("libgdx-oboe")
     }
 
-    /**
-     * Set the low memory mode for SoundPool.
-     * When enabled, SoundPool will store samples as int16_t instead of float to save memory.
-     */
-    fun setLowMemoryMode(enabled: Boolean) {
-        setLowMemoryModeNative(enabled)
-    }
-
-    private external fun setLowMemoryModeNative(enabled: Boolean)
     private external fun createSoundpoolFromAsset(assetManager: AssetManager, path: String): Long
     private external fun createSoundpoolFromPath(path: String): Long
     private external fun createMusicFromAsset(assetManager: AssetManager, path: String): Long
