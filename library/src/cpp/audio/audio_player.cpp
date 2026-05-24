@@ -20,8 +20,8 @@ audio_player::audio_player()
 audio_player::audio_player(uint32_t sample_rate)
     : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
     , m_volume(1.0f) {
-    m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
-        return generate_audio(num_frames);
+    m_engine.set_on_async_write([this](uint32_t num_samples) -> const std::vector<int16_t>& {
+        return generate_audio(num_samples);
     });
 }
 
@@ -31,10 +31,12 @@ void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
     m_tracks.emplace_back(audio);
 }
 
-const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
+const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    const uint32_t total_samples = num_frames * m_engine.channels();
+    // The parameter num_samples is already total samples (frames * channels)
+    const uint32_t total_samples = num_samples;
+    const uint32_t num_frames = total_samples / m_engine.channels();
 
     m_pcm.clear();
     m_pcm.resize(total_samples, 0);
@@ -44,13 +46,14 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
 
     for (const auto &weak_track : m_tracks) {
         if (auto track = weak_track.lock()) {
+            // Use the most accurate frame count from the engine for synchronization
             track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
 
             std::fill(m_buffer.begin(), m_buffer.begin() + total_samples, 0);
-            track->render(m_buffer.data(), num_frames / m_engine.channels());
+            track->render(m_buffer.data(), num_frames);
 
 #if IS_LOW_POWER_DEVICE
-            // 32位设备：使用 int32_t 混音，避免 64 位整数运算开销
+            // 32-bit device path: optimized mixing
             for (uint32_t i = 0; i < total_samples; ++i) {
                 int32_t mixed = static_cast<int32_t>(m_pcm[i]) + static_cast<int32_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
@@ -58,7 +61,7 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
                 m_pcm[i] = static_cast<int16_t>(mixed);
             }
 #else
-            // 64位设备：还原回你最顺手的 int64_t 混音，现代 CPU 处理这个非常快
+            // 64-bit device path: standard int64_t mixing
             for (uint32_t i = 0; i < total_samples; ++i) {
                 int64_t mixed = static_cast<int64_t>(m_pcm[i]) + static_cast<int64_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
@@ -80,7 +83,6 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
 
     if (m_volume != 1.0f) {
 #if IS_LOW_POWER_DEVICE
-        // 32位设备：使用定点数音量调节，避免浮点运算
         constexpr int32_t VOL_SHIFT = 12;
         int32_t vol_fixed = static_cast<int32_t>(m_volume * (1 << VOL_SHIFT));
         for (auto& pcm_bit : m_pcm) {
@@ -90,7 +92,6 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
             else pcm_bit = static_cast<int16_t>(scaled);
         }
 #else
-        // 64位设备：还原回浮点数乘法，由于寄存器宽，浮点运算对你来说反而更有利于向量化
         for (auto& pcm_bit : m_pcm) {
             pcm_bit = static_cast<int16_t>(static_cast<float>(pcm_bit) * m_volume);
         }
