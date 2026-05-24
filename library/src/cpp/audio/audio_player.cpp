@@ -15,7 +15,11 @@ int64_t k_limit_up = std::numeric_limits<int16_t>::max();
 }
 
 audio_player::audio_player()
-    : m_engine(oboe_engine::mode::async_writing)
+    : audio_player(48000) {
+}
+
+audio_player::audio_player(uint32_t sample_rate)
+    : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
     , m_volume(1.0f) {
     m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
         return generate_audio(num_frames);

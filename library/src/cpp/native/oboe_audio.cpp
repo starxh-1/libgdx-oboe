@@ -1,6 +1,7 @@
 #include "oboe_audio.hpp"
 
 #include <memory>
+#include "../audio/audio_config.hpp"
 #include "../audio/oboe_engine.hpp"
 #include "../utility/var.hpp"
 #include "../utility/log.hpp"
@@ -15,6 +16,8 @@
 #include "../audio/music.hpp"
 #include "../audio/soundpool.hpp"
 
+uint32_t g_audio_sample_rate = 48000;
+
 namespace {
     constexpr std::string_view k_shared_player = "sharedAudioPlayer";
     constexpr uint8_t k_channels = 2;
@@ -24,7 +27,7 @@ inline audio_player* get_or_create_shared_player(JNIEnv *env, jobject self) {
     if (auto player = get_var_as<audio_player>(env, self, k_shared_player)) {
         return player;
     } else {
-        auto* new_player = new audio_player();
+        auto* new_player = new audio_player(g_audio_sample_rate);
         new_player->resume();
         set_var_as(env, self, k_shared_player, new_player);
         return new_player;
@@ -60,7 +63,7 @@ inline std::unique_ptr<audio_decoder> fromAsset(JNIEnv *env, jobject self, jobje
     std::string native_path = jni_utf8_string(env, path);
 
     return internal_asset::create(native_path, native_manager)
-            .and_then([](internal_asset &&asset) { return decoder_bundle::create(asset); })
+            .and_then([](internal_asset &&asset) { return decoder_bundle::create(asset, g_audio_sample_rate); })
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
             })
@@ -73,7 +76,7 @@ inline std::unique_ptr<audio_decoder> fromAsset(JNIEnv *env, jobject self, jobje
 inline std::unique_ptr<audio_decoder> fromPath(JNIEnv *env, jobject self, jstring path) {
     std::string native_path = jni_utf8_string(env, path);
 
-    return decoder_bundle::create(native_path)
+    return decoder_bundle::create(native_path, g_audio_sample_rate)
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
             })
@@ -92,6 +95,25 @@ OBOEAUDIO_METHOD(jlong, createMusicFromAsset)(JNIEnv *env, jobject self, jobject
 OBOEAUDIO_METHOD(jlong, createMusicFromPath)(JNIEnv *env, jobject self, jstring path) {
     std::unique_ptr<audio_decoder> decoder = fromPath(env, self, path);
     return createMusic(env, self, std::move(decoder));
+}
+
+OBOEAUDIO_METHOD(jshortArray, decodeToPCM)(JNIEnv *env, jobject self, jstring path) {
+    std::string native_path = jni_utf8_string(env, path);
+
+    auto decoder = decoder_bundle::create(native_path, g_audio_sample_rate)
+            .map([](decoder_bundle &&bundle) {
+                return std::make_unique<audio_decoder>(std::move(bundle));
+            })
+            .unwrap_or_else([](simple_error &&error) {
+                return std::unique_ptr<audio_decoder>(nullptr);
+            });
+
+    if (!decoder) return nullptr;
+
+    auto buffer = decoder->decode();
+    jshortArray result = env->NewShortArray(buffer.size());
+    env->SetShortArrayRegion(result, 0, buffer.size(), buffer.data());
+    return result;
 }
 
 OBOEAUDIO_METHOD(jlong, createSoundpoolFromAsset)(JNIEnv *env, jobject self, jobject asset_manager,
@@ -123,6 +145,10 @@ OBOEAUDIO_METHOD(void, resume)(JNIEnv *env, jobject self) {
 OBOEAUDIO_METHOD(void, pause)(JNIEnv *env, jobject self) {
     auto* player = get_or_create_shared_player(env, self);
     player->stop();
+}
+
+OBOEAUDIO_METHOD(void, nativeInit)(JNIEnv *env, jobject self, jint sampleRate) {
+    g_audio_sample_rate = static_cast<uint32_t>(sampleRate);
 }
 
 OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *env, jobject self) {

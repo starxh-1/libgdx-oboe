@@ -14,12 +14,12 @@ public:
     /// Try to create a decoder_bundle from a file
     /// @param filename Full path to the file to decode
     /// @return Result with either a @p decoder_bundle, or delegated @p decoder_bundle_error
-    static decoder_bundle_result create(std::string_view filename);
+    static decoder_bundle_result create(std::string_view filename, int target_sample_rate = 48000);
 
     /// Try to create a decoder_bundle from an internal_asset
     /// @param asset Valid internal_asset object
     /// @return Result with either a @p decoder_bundle, or delegated @p decoder_bundle_error
-    static decoder_bundle_result create(internal_asset &asset);
+    static decoder_bundle_result create(internal_asset &asset, int target_sample_rate = 48000);
 
     format_context_ptr m_format_ctx;
     codec_context_ptr m_codec_ctx;

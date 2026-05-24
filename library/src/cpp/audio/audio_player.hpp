@@ -13,6 +13,9 @@ public:
     /// Creates a default audio_player.
     audio_player();
 
+    /// Creates an audio_player with specified sample rate.
+    audio_player(uint32_t sample_rate);
+
     /// Plays a renderable_audio implementation.
     void play_audio(const std::shared_ptr<renderable_audio> &audio);
 

@@ -15,13 +15,19 @@ import com.badlogic.gdx.utils.GdxRuntimeException
 
 /** [Audio] implementation which utilize [OboeMusic] and [OboeSound].
  * Returns [GdxRuntimeException] on native errors */
-class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
+class OboeAudio(
+    private val assetManager: AssetManager,
+    sampleRate: Int = 48000
+) : AndroidAudio {
     private var sharedAudioPlayer: NativeAudioPlayer = NativeAudioPlayer()
     private val disposables: MutableList<Disposable> = mutableListOf()
 
     init {
         System.loadLibrary("libgdx-oboe")
+        nativeInit(sampleRate)
     }
+
+    private external fun nativeInit(sampleRate: Int)
 
     private external fun createSoundpoolFromAsset(assetManager: AssetManager, path: String): Long
     private external fun createSoundpoolFromPath(path: String): Long
@@ -34,6 +40,7 @@ class OboeAudio(private val assetManager: AssetManager) : AndroidAudio {
     private external fun disposeEngine()
     private external fun getAudioSessionId(): Int
     private external fun getSpectrum(): FloatArray
+    external fun decodeToPCM(path: String): ShortArray?
 
     fun getAudioSessionIdInternal(): Int {
         return getAudioSessionId()

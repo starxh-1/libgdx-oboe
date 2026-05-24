@@ -35,6 +35,9 @@ OBOEAUDIO_METHOD(void, pause)(JNIEnv *, jobject);
 // fun OboeAudio::getAudioSessionId(): Int
 OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *, jobject);
 
+// fun OboeAudio::nativeInit(sampleRate: Int): Unit
+OBOEAUDIO_METHOD(void, nativeInit)(JNIEnv *, jobject, jint);
+
 // fun OboeAudio::getSpectrum(): FloatArray
 OBOEAUDIO_METHOD(jfloatArray, getSpectrum)(JNIEnv *, jobject);
 
