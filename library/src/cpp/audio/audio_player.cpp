@@ -20,8 +20,8 @@ audio_player::audio_player()
 audio_player::audio_player(uint32_t sample_rate)
     : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
     , m_volume(1.0f) {
-    m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
-        return generate_audio(num_frames);
+    m_engine.set_on_async_write([this](uint32_t num_samples) -> const std::vector<int16_t>& {
+        return generate_audio(num_samples);
     });
 }
 
@@ -31,10 +31,11 @@ void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
     m_tracks.emplace_back(audio);
 }
 
-const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
+const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    const uint32_t total_samples = num_frames * m_engine.channels();
+    const uint32_t total_samples = num_samples;
+    const uint32_t num_frames = total_samples / m_engine.channels();
 
     m_pcm.clear();
     m_pcm.resize(total_samples, 0);
@@ -47,7 +48,7 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
             track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
 
             std::fill(m_buffer.begin(), m_buffer.begin() + total_samples, 0);
-            track->render(m_buffer.data(), num_frames / m_engine.channels());
+            track->render(m_buffer.data(), num_frames);
 
 #if IS_LOW_POWER_DEVICE
             for (uint32_t i = 0; i < total_samples; ++i) {

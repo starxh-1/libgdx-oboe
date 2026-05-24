@@ -189,6 +189,11 @@ oboe::DataCallbackResult oboe_engine::onAudioReady(oboe::AudioStream *self, void
     android_assert(m_mode == mode::async_writing,
                    "engine not in async_writing mode, something went wrong.");
 
+    // Cache hardware frame count once at callback start for sync_timing
+    if (m_stream) {
+        m_frames_read = static_cast<uint64_t>(m_stream->getFramesRead());
+    }
+
     if (num_frames > 0 && m_on_async_write) {
         auto& pcm_queue = m_on_async_write(static_cast<uint32_t>(num_frames * m_channels));
         auto stream = static_cast<int16_t*>(audio_data);
@@ -207,7 +212,6 @@ oboe::DataCallbackResult oboe_engine::onAudioReady(oboe::AudioStream *self, void
         }
     }
 
-    m_frames_read += num_frames;
     return oboe::DataCallbackResult::Continue;
 }
 
