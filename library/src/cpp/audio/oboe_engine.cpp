@@ -298,9 +298,6 @@ uint32_t oboe_engine::payload_size() const {
 }
 
 uint64_t oboe_engine::frames_read() const {
-    if (m_stream) {
-        return static_cast<uint64_t>(m_stream->getFramesRead());
-    }
     return m_frames_read;
 }
 

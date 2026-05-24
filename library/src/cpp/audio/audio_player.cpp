@@ -20,8 +20,8 @@ audio_player::audio_player()
 audio_player::audio_player(uint32_t sample_rate)
     : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
     , m_volume(1.0f) {
-    m_engine.set_on_async_write([this](uint32_t num_samples) -> const std::vector<int16_t>& {
-        return generate_audio(num_samples);
+    m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
+        return generate_audio(num_frames);
     });
 }
 
@@ -31,12 +31,10 @@ void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
     m_tracks.emplace_back(audio);
 }
 
-const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
+const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // The parameter num_samples is already total samples (frames * channels)
-    const uint32_t total_samples = num_samples;
-    const uint32_t num_frames = total_samples / m_engine.channels();
+    const uint32_t total_samples = num_frames * m_engine.channels();
 
     m_pcm.clear();
     m_pcm.resize(total_samples, 0);
@@ -46,14 +44,12 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
 
     for (const auto &weak_track : m_tracks) {
         if (auto track = weak_track.lock()) {
-            // Use the most accurate frame count from the engine for synchronization
             track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
 
             std::fill(m_buffer.begin(), m_buffer.begin() + total_samples, 0);
-            track->render(m_buffer.data(), num_frames);
+            track->render(m_buffer.data(), num_frames / m_engine.channels());
 
 #if IS_LOW_POWER_DEVICE
-            // 32-bit device path: optimized mixing
             for (uint32_t i = 0; i < total_samples; ++i) {
                 int32_t mixed = static_cast<int32_t>(m_pcm[i]) + static_cast<int32_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
@@ -61,7 +57,6 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
                 m_pcm[i] = static_cast<int16_t>(mixed);
             }
 #else
-            // 64-bit device path: standard int64_t mixing
             for (uint32_t i = 0; i < total_samples; ++i) {
                 int64_t mixed = static_cast<int64_t>(m_pcm[i]) + static_cast<int64_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
