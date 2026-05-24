@@ -9,8 +9,8 @@
 #include <sys/system_properties.h>
 #include <stdlib.h>
 
-// Detect 32-bit ARM for buffer size adjustment
-#if defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__)
+// Detect 64-bit architecture for buffer size adjustment
+#if defined(__LP64__) || defined(__aarch64__) || defined(__amd64__) || defined(__x86_64__)
     #define IS_LOW_POWER_DEVICE 0
 #else
     #define IS_LOW_POWER_DEVICE 1
