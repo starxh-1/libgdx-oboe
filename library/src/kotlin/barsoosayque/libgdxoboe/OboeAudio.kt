@@ -40,6 +40,7 @@ class OboeAudio(
     private external fun disposeEngine()
     private external fun getAudioSessionId(): Int
     private external fun getSpectrum(): FloatArray
+    external fun setPlayMode(play: Boolean)
     external fun decodeToPCM(path: String): ShortArray?
 
     fun getAudioSessionIdInternal(): Int {
@@ -51,6 +52,15 @@ class OboeAudio(
      */
     fun getSpectrumMagnitudes(): FloatArray {
         return getSpectrum()
+    }
+
+    /**
+     * Set play mode for audio threading strategy.
+     * true = play mode (spinlock for low latency)
+     * false = non-play mode (mutex for thread safety, e.g., result screen)
+     */
+    fun setAudioPlayMode(play: Boolean) {
+        setPlayMode(play)
     }
 
     override fun notifyMusicDisposed(music: AndroidMusic?) {

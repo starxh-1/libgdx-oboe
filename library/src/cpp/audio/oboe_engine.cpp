@@ -1,4 +1,5 @@
 #include "oboe_engine.hpp"
+#include "../utility/ptrptr.hpp"
 #include "../utility/log.hpp"
 #include "../utility/exception.hpp"
 #include <array>
@@ -156,7 +157,7 @@ void oboe_engine::connect_to_device() {
          oboe::convertToText(m_stream->getState()),
          m_consecutive_errors);
 
-    // Calculate buffer multiplier
+    // Calculate buffer multiplier - 32-bit devices use 4, 64-bit uses 2
     int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
     debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
@@ -190,9 +191,14 @@ oboe::DataCallbackResult oboe_engine::onAudioReady(oboe::AudioStream *self, void
                    "engine not in async_writing mode, something went wrong.");
 
     // Cache hardware frame count once at callback start for sync_timing
+#if IS_LOW_POWER_DEVICE
+    // 32-bit: use manual frame counter (avoid getFramesRead overhead on OpenSL ES)
+    m_frames_read += num_frames;
+#else
     if (m_stream) {
         m_frames_read = static_cast<uint64_t>(m_stream->getFramesRead());
     }
+#endif
 
     if (num_frames > 0 && m_on_async_write) {
         auto& pcm_queue = m_on_async_write(static_cast<uint32_t>(num_frames * m_channels));
@@ -299,12 +305,4 @@ void oboe_engine::blocking_read(int16_t* buffer, size_t len) {
 
 uint32_t oboe_engine::payload_size() const {
     return m_payload_size * m_channels;
-}
-
-uint64_t oboe_engine::frames_read() const {
-    return m_frames_read;
-}
-
-int32_t oboe_engine::get_audio_session_id() const {
-    return m_stream ? m_stream->getSessionId() : 0;
 }

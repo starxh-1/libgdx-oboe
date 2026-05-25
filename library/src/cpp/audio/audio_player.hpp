@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <atomic>
 
 /// oboe_engine frontend for playing renderable_audio.
 class audio_player {
@@ -35,6 +36,10 @@ public:
     /// Get spectrum data
     const std::vector<float>& get_spectrum() { return m_analyzer.get_bands(); }
 
+    /// Check if currently in play mode (for spinlock vs mutex decision)
+    bool is_play_mode() const { return m_play_mode.load(std::memory_order_acquire); }
+    void set_play_mode(bool play) { m_play_mode.store(play, std::memory_order_release); }
+
 private:
     const std::vector<int16_t>& generate_audio(uint32_t num_frames);
 
@@ -46,5 +51,8 @@ private:
     std::vector<int16_t> m_buffer;
     std::vector<std::weak_ptr<renderable_audio>> m_tracks;
 
+    // Spinlock for play mode, mutex for non-play mode
+    std::atomic_flag m_rendering_flag;
     std::mutex m_mutex;
+    std::atomic<bool> m_play_mode{true};
 };

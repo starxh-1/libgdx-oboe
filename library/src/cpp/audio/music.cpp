@@ -43,15 +43,28 @@ void music::stop() {
 }
 
 void music::position(float position) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_executor.wait();
-    m_decoder->seek(position);
-    m_position.store(position, std::memory_order_release);
-    // Reset sync state so next sync re-baselines
-    m_is_synced.store(false, std::memory_order_release);
-    fill_second_buffer();
-    swap_buffers();
-    m_executor.queue();
+    // Use mutex in non-play mode for thread safety
+    if (!m_play_mode.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_executor.wait();
+        m_decoder->seek(position);
+        m_position.store(position, std::memory_order_release);
+        m_is_synced.store(false, std::memory_order_release);
+        fill_second_buffer();
+        swap_buffers();
+        m_executor.queue();
+    } else {
+        // Play mode: use spinlock
+        while (m_buffer_swap.test_and_set(std::memory_order_acquire));
+        m_executor.wait();
+        m_decoder->seek(position);
+        m_position.store(position, std::memory_order_release);
+        m_is_synced.store(false, std::memory_order_release);
+        fill_second_buffer();
+        swap_buffers();
+        m_executor.queue();
+        m_buffer_swap.clear(std::memory_order_release);
+    }
 }
 
 void music::raw_render(int16_t *stream, uint32_t frames) {
@@ -79,13 +92,23 @@ void music::render(int16_t *stream, uint32_t frames) {
 
     uint32_t frames_to_process;
     int32_t frames_in_pcm;
-    {
+
+    // Use mutex in non-play mode, spinlock in play mode
+    if (!m_play_mode.load(std::memory_order_acquire)) {
         std::lock_guard<std::mutex> lock(m_mutex);
         frames_in_pcm = m_main_pcm.size() / m_channels;
         frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
                                                 static_cast<int32_t>(frames));
 
         raw_render(stream, frames_to_process);
+    } else {
+        while (m_buffer_swap.test_and_set(std::memory_order_acquire));
+        frames_in_pcm = m_main_pcm.size() / m_channels;
+        frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
+                                                static_cast<int32_t>(frames));
+
+        raw_render(stream, frames_to_process);
+        m_buffer_swap.clear(std::memory_order_release);
     }
 
     if (frames_to_process < frames) {
@@ -103,17 +126,32 @@ void music::render(int16_t *stream, uint32_t frames) {
         bool buffer_ready = m_executor.wait_for(std::chrono::milliseconds(sizeof(void*) == 4 ? 1000 : 100));
 
         if (buffer_ready) {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            swap_buffers();
-            if (m_playing) {
-                if (m_looping && m_decoder->is_eof()) {
-                    m_decoder->seek(0);
+            if (!m_play_mode.load(std::memory_order_acquire)) {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                swap_buffers();
+                if (m_playing) {
+                    if (m_looping && m_decoder->is_eof()) {
+                        m_decoder->seek(0);
+                    }
+                    m_executor.queue();
                 }
-                m_executor.queue();
+                // render additional pcm to fill full stream
+                int16_t remain = frames - frames_to_process;
+                raw_render(stream + frames_to_process * m_channels, remain);
+            } else {
+                while (m_buffer_swap.test_and_set(std::memory_order_acquire));
+                swap_buffers();
+                if (m_playing) {
+                    if (m_looping && m_decoder->is_eof()) {
+                        m_decoder->seek(0);
+                    }
+                    m_executor.queue();
+                }
+                // render additional pcm to fill full stream
+                int16_t remain = frames - frames_to_process;
+                raw_render(stream + frames_to_process * m_channels, remain);
+                m_buffer_swap.clear(std::memory_order_release);
             }
-            // render additional pcm to fill full stream
-            int16_t remain = frames - frames_to_process;
-            raw_render(stream + frames_to_process * m_channels, remain);
         }
         // If timeout, just skip - the existing m_main_pcm has remaining data to use
     }

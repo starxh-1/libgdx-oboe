@@ -3,6 +3,7 @@
 #include <memory>
 #include "../audio/audio_config.hpp"
 #include "../audio/oboe_engine.hpp"
+#include "../audio/oboe_engine.hpp"
 #include "../utility/var.hpp"
 #include "../utility/log.hpp"
 #include "../utility/exception.hpp"
@@ -165,4 +166,9 @@ OBOEAUDIO_METHOD(jfloatArray, getSpectrum)(JNIEnv *env, jobject self) {
 
     env->SetFloatArrayRegion(result, 0, spectrum.size(), spectrum.data());
     return result;
+}
+
+OBOEAUDIO_METHOD(void, setPlayMode)(JNIEnv *env, jobject self, jboolean play) {
+    auto* player = get_or_create_shared_player(env, self);
+    player->set_play_mode(play);
 }

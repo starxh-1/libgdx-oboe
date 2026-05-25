@@ -50,14 +50,14 @@ public:
     /// Get size of buffer in samples.
     uint32_t payload_size() const;
 
-    /// Get audio session ID for Visualizer.
-    int32_t get_audio_session_id() const;
-
     /// Get the actual sample rate of the audio stream.
     uint32_t sample_rate() const { return m_sample_rate; }
 
     /// Get the total number of frames read from the stream since start.
-    uint64_t frames_read() const;
+    uint64_t frames_read() const { return m_frames_read; }
+
+    /// Get audio session ID for Visualizer.
+    int32_t get_audio_session_id() const { return m_stream ? m_stream->getSessionId() : 0; }
 
 private:
     // oboe::AudioStreamDataCallback interface

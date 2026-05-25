@@ -32,13 +32,19 @@ OBOEAUDIO_METHOD(void, resume)(JNIEnv *, jobject);
 // fun OboeAudio::pause(): Unit
 OBOEAUDIO_METHOD(void, pause)(JNIEnv *, jobject);
 
-// fun OboeAudio::getAudioSessionId(): Int
-OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *, jobject);
-
 // fun OboeAudio::nativeInit(sampleRate: Int): Unit
 OBOEAUDIO_METHOD(void, nativeInit)(JNIEnv *, jobject, jint);
 
+// fun OboeAudio::getAudioSessionId(): Int
+OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *, jobject);
+
 // fun OboeAudio::getSpectrum(): FloatArray
 OBOEAUDIO_METHOD(jfloatArray, getSpectrum)(JNIEnv *, jobject);
+
+// fun OboeAudio::setPlayMode(play: Boolean): Void
+OBOEAUDIO_METHOD(void, setPlayMode)(JNIEnv *, jobject, jboolean);
+
+// fun OboeAudio::decodeToPCM(path: String): ShortArray
+OBOEAUDIO_METHOD(jshortArray, decodeToPCM)(JNIEnv *, jobject, jstring);
 
 }

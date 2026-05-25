@@ -10,7 +10,8 @@
 #endif
 
 namespace {
-// Constants for audio processing
+int64_t k_limit_down = std::numeric_limits<int16_t>::min();
+int64_t k_limit_up = std::numeric_limits<int16_t>::max();
 }
 
 audio_player::audio_player()
@@ -19,54 +20,63 @@ audio_player::audio_player()
 
 audio_player::audio_player(uint32_t sample_rate)
     : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
-    , m_volume(1.0f) {
-    m_engine.set_on_async_write([this](uint32_t num_samples) -> const std::vector<int16_t>& {
-        return generate_audio(num_samples);
+    , m_volume(1.0f)
+    , m_rendering_flag(false)
+    , m_play_mode(true) {
+    m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
+        return generate_audio(num_frames);
     });
 }
 
 void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    m_tracks.emplace_back(audio);
+    // Use mutex in non-play mode for thread safety (e.g., result screen)
+    if (!m_play_mode.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_tracks.emplace_back(audio);
+    } else {
+        // Play mode: use spinlock
+        while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+        m_tracks.emplace_back(audio);
+        m_rendering_flag.clear(std::memory_order_release);
+    }
 }
 
-const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    const uint32_t total_samples = num_samples;
-    const uint32_t num_frames = total_samples / m_engine.channels();
+const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
+    // Use spinlock in play mode, mutex in non-play mode
+    if (m_play_mode.load(std::memory_order_acquire)) {
+        while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    }
 
     m_pcm.clear();
-    m_pcm.resize(total_samples, 0);
-    m_buffer.resize(total_samples, 0);
+    m_pcm.resize(num_frames, 0);
+    m_buffer.resize(m_pcm.size(), 0);
 
     bool is_dirty = false;
 
     for (const auto &weak_track : m_tracks) {
+        is_dirty |= weak_track.expired();
         if (auto track = weak_track.lock()) {
             track->sync_timing(m_engine.sample_rate(), m_engine.frames_read());
 
-            std::fill(m_buffer.begin(), m_buffer.begin() + total_samples, 0);
-            track->render(m_buffer.data(), num_frames);
+            std::fill(m_buffer.begin(), m_buffer.end(), 0);
+            track->render(m_buffer.data(), num_frames / m_engine.channels());
 
+            // Mix with int32 on 32-bit devices, int64 on 64-bit devices
 #if IS_LOW_POWER_DEVICE
-            for (uint32_t i = 0; i < total_samples; ++i) {
+            for (uint32_t i = 0; i < m_pcm.size(); ++i) {
                 int32_t mixed = static_cast<int32_t>(m_pcm[i]) + static_cast<int32_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
                 else if (mixed > 32767) mixed = 32767;
                 m_pcm[i] = static_cast<int16_t>(mixed);
             }
 #else
-            for (uint32_t i = 0; i < total_samples; ++i) {
+            for (uint32_t i = 0; i < m_pcm.size(); ++i) {
                 int64_t mixed = static_cast<int64_t>(m_pcm[i]) + static_cast<int64_t>(m_buffer[i]);
                 if (mixed < -32768) mixed = -32768;
                 else if (mixed > 32767) mixed = 32767;
                 m_pcm[i] = static_cast<int16_t>(mixed);
             }
 #endif
-        } else {
-            is_dirty = true;
         }
     }
 
@@ -94,7 +104,11 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_samples) {
 #endif
     }
 
-    m_analyzer.feed(m_pcm.data(), total_samples, m_engine.channels());
+    m_analyzer.feed(m_pcm.data(), m_pcm.size(), m_engine.channels());
+
+    if (m_play_mode.load(std::memory_order_acquire)) {
+        m_rendering_flag.clear(std::memory_order_release);
+    }
 
     return m_pcm;
 }
