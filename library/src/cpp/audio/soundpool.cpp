@@ -1,8 +1,15 @@
 #include "soundpool.hpp"
 #include <iterator>
 #include <algorithm>
+#include <thread>
 #include "../samplerate/pcmtypes.hpp"
 #include "../utility/log.hpp"
+
+#if defined(__LP64__) || defined(__aarch64__) || defined(__x86_64__) || defined(__amd64__)
+    #define IS_LOW_POWER_DEVICE 0
+#else
+    #define IS_LOW_POWER_DEVICE 1
+#endif
 
 soundpool::soundpool(const data_t &pcm, int8_t channels)
         : m_last_id(0)
@@ -13,7 +20,11 @@ soundpool::soundpool(const data_t &pcm, int8_t channels)
 
 void soundpool::do_by_id(long id, const std::function<void(
         std::vector<soundpool::sound>::iterator)> &callback) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     auto iter = std::find_if(m_sounds.begin(), m_sounds.end(), [id](const soundpool::sound &sound) {
         return sound.m_id == id;
     });
@@ -37,7 +48,11 @@ soundpool::sound soundpool::gen_sound(float volume, float pan, float speed, bool
 }
 
 long soundpool::play(float volume, float speed, float pan, bool loop) {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     m_sounds.emplace_back(gen_sound(volume, pan, speed, loop));
     long id = m_sounds.back().m_id;
     m_rendering_flag.clear(std::memory_order_release);
@@ -45,7 +60,11 @@ long soundpool::play(float volume, float speed, float pan, bool loop) {
 }
 
 void soundpool::pause() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     for (auto &sound : m_sounds) {
         sound.m_paused = true;
     }
@@ -57,7 +76,11 @@ void soundpool::pause(long id) {
 }
 
 void soundpool::resume() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     for (auto &sound : m_sounds) {
         sound.m_paused = false;
     }
@@ -69,7 +92,11 @@ void soundpool::resume(long id) {
 }
 
 void soundpool::stop() {
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     m_sounds.clear();
     m_rendering_flag.clear(std::memory_order_release);
 }
@@ -103,7 +130,11 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
     static int limit_down = std::numeric_limits<int16_t>::min(),
             limit_up = std::numeric_limits<int16_t>::max();
 
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+#if IS_LOW_POWER_DEVICE
+        std::this_thread::yield();
+#endif
+    }
     int prevaluated = 0;
     m_sample_buffer.reserve(num_frames * m_channels + 16);
     for (auto it = m_sounds.begin(); it != m_sounds.end();) {
