@@ -6,6 +6,13 @@
 #include "../samplerate/resampler.hpp"
 #include <functional>
 #include <atomic>
+#include <thread>
+
+#if defined(__LP64__) || defined(__aarch64__) || defined(__x86_64__) || defined(__amd64__)
+    #define IS_LOW_POWER_DEVICE 0
+#else
+    #define IS_LOW_POWER_DEVICE 1
+#endif
 
 /// Soundpool native implementation.
 /// Uses fully loaded 16Bit PCM to play infinite number of sounds.
@@ -73,4 +80,10 @@ private:
     std::vector<float> m_pcm, m_sample_buffer;
 
     std::atomic_flag m_rendering_flag;
+
+#if IS_LOW_POWER_DEVICE
+    // Lock-free pending list: UI thread appends, audio thread consumes in render()
+    std::vector<sound> m_pending;
+    std::atomic_flag m_pending_flag;
+#endif
 };
