@@ -56,8 +56,7 @@ class OboeAudio(
 
     /**
      * Set play mode for audio threading strategy.
-     * true = play mode (spinlock for low latency)
-     * false = non-play mode (mutex for thread safety, e.g., result screen)
+     * Note: This is now a no-op as we have restored global spinlock for consistency with upstream.
      */
     fun setAudioPlayMode(play: Boolean) {
         setPlayMode(play)

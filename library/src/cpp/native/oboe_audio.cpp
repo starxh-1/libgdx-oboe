@@ -169,6 +169,5 @@ OBOEAUDIO_METHOD(jfloatArray, getSpectrum)(JNIEnv *env, jobject self) {
 }
 
 OBOEAUDIO_METHOD(void, setPlayMode)(JNIEnv *env, jobject self, jboolean play) {
-    auto* player = get_or_create_shared_player(env, self);
-    player->set_play_mode(play);
+    // No-op: restored to global spinlock
 }

@@ -4,7 +4,6 @@
 #include "renderable_audio.hpp"
 #include "pan_effect.hpp"
 #include "../utility/executor.hpp"
-#include <mutex>
 #include <atomic>
 #include <cstdint>
 
@@ -48,10 +47,6 @@ public:
     /// Set callaback on completing music track (last frame rendered).
     void on_complete(on_complete_t&& callback) { m_on_complete = std::move(callback); }
 
-    /// Set whether we're in play mode (spinlock) or not (mutex)
-    void set_play_mode(bool play) { m_play_mode.store(play, std::memory_order_release); }
-    bool is_play_mode() const { return m_play_mode.load(std::memory_order_acquire); }
-
 public:
     // renderable_audio interface
     void render(int16_t *stream, uint32_t frames) override;
@@ -76,9 +71,7 @@ private:
     std::vector<int16_t> m_main_pcm;
     std::vector<int16_t> m_buffer_pcm;
 
-    std::mutex m_mutex;
     std::atomic_flag m_buffer_swap;
-    std::atomic<bool> m_play_mode{true};
     executor m_executor;
 
     // Timing synchronization with audio engine

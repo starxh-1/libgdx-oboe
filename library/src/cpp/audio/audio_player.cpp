@@ -21,31 +21,20 @@ audio_player::audio_player()
 audio_player::audio_player(uint32_t sample_rate)
     : m_engine(oboe_engine::mode::async_writing, 2, sample_rate)
     , m_volume(1.0f)
-    , m_rendering_flag(false)
-    , m_play_mode(true) {
+    , m_rendering_flag(false) {
     m_engine.set_on_async_write([this](uint32_t num_frames) -> const std::vector<int16_t>& {
         return generate_audio(num_frames);
     });
 }
 
 void audio_player::play_audio(const std::shared_ptr<renderable_audio> &audio) {
-    // Use mutex in non-play mode for thread safety (e.g., result screen)
-    if (!m_play_mode.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_tracks.emplace_back(audio);
-    } else {
-        // Play mode: use spinlock
-        while (m_rendering_flag.test_and_set(std::memory_order_acquire));
-        m_tracks.emplace_back(audio);
-        m_rendering_flag.clear(std::memory_order_release);
-    }
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
+    m_tracks.emplace_back(audio);
+    m_rendering_flag.clear(std::memory_order_release);
 }
 
 const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
-    // Use spinlock in play mode, mutex in non-play mode
-    if (m_play_mode.load(std::memory_order_acquire)) {
-        while (m_rendering_flag.test_and_set(std::memory_order_acquire));
-    }
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire));
 
     m_pcm.clear();
     m_pcm.resize(num_frames, 0);
@@ -106,9 +95,7 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
 
     m_analyzer.feed(m_pcm.data(), m_pcm.size(), m_engine.channels());
 
-    if (m_play_mode.load(std::memory_order_acquire)) {
-        m_rendering_flag.clear(std::memory_order_release);
-    }
+    m_rendering_flag.clear(std::memory_order_release);
 
     return m_pcm;
 }
