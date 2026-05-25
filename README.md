@@ -43,7 +43,6 @@ class AndroidLauncher : AndroidApplication() {
 ## Differences of this fork
 
 - Spectrum Analyzer support (with KissFFT) 音频频谱
-- Mutex for result Result界面改成了互斥锁，疑似oraja因为相关问题导致result界面卡死（也不排除是SQLite相关问题，仍在排查）
 - 48000Hz as default
 
 ## How does the library work
