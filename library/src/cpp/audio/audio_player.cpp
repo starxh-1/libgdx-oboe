@@ -102,7 +102,10 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
         }
 #else
         for (auto& pcm_bit : m_pcm) {
-            pcm_bit = static_cast<int16_t>(static_cast<float>(pcm_bit) * m_volume);
+            float scaled = static_cast<float>(pcm_bit) * m_volume;
+            if (scaled < -32768.0f) pcm_bit = -32768;
+            else if (scaled > 32767.0f) pcm_bit = 32767;
+            else pcm_bit = static_cast<int16_t>(scaled);
         }
 #endif
     }
