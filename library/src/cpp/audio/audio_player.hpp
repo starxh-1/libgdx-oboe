@@ -7,6 +7,12 @@
 #include <vector>
 #include <atomic>
 
+#if defined(__LP64__) || defined(__aarch64__) || defined(__x86_64__) || defined(__amd64__)
+    #define IS_LOW_POWER_DEVICE 0
+#else
+    #define IS_LOW_POWER_DEVICE 1
+#endif
+
 /// oboe_engine frontend for playing renderable_audio.
 class audio_player {
 public:
@@ -48,4 +54,10 @@ private:
 
     // Spinlock for thread safety
     std::atomic_flag m_rendering_flag;
+
+#if IS_LOW_POWER_DEVICE
+    // 32-bit: periodic cleanup to avoid O(n) erase in every audio callback
+    std::atomic<uint32_t> m_cleanup_counter{0};
+    static constexpr uint32_t CLEANUP_INTERVAL = 64;  // cleanup every N callbacks
+#endif
 };

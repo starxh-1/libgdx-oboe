@@ -69,12 +69,26 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
         }
     }
 
+#if IS_LOW_POWER_DEVICE
+    // 32-bit: only cleanup periodically to avoid O(n) erase in every callback
+    if (is_dirty) {
+        m_cleanup_counter++;
+        if (m_cleanup_counter >= CLEANUP_INTERVAL) {
+            m_tracks.erase(std::remove_if(m_tracks.begin(), m_tracks.end(),
+                                          [](const std::weak_ptr<renderable_audio>& track) {
+                                              return track.expired();
+                                          }), m_tracks.end());
+            m_cleanup_counter.store(0);
+        }
+    }
+#else
     if (is_dirty) {
         m_tracks.erase(std::remove_if(m_tracks.begin(), m_tracks.end(),
                                       [](const std::weak_ptr<renderable_audio>& track) {
                                           return track.expired();
                                       }), m_tracks.end());
     }
+#endif
 
     if (m_volume != 1.0f) {
 #if IS_LOW_POWER_DEVICE

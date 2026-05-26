@@ -157,8 +157,8 @@ void oboe_engine::connect_to_device() {
          oboe::convertToText(m_stream->getState()),
          m_consecutive_errors);
 
-    // Calculate buffer multiplier - 32-bit devices use 3, 64-bit uses 2
-    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 3 : 2;
+    // Calculate buffer multiplier - 32-bit devices use 4, 64-bit uses 2
+    int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;
     debug("oboe_engine buffer: burst={}, multiplier={}, total={} frames",
           m_stream->getFramesPerBurst(), burst_multiplier, m_payload_size);
