@@ -44,6 +44,7 @@ class AndroidLauncher : AndroidApplication() {
 
 - Spectrum Analyzer support (with KissFFT) 音频频谱
 - 48000Hz as default
+- 大量针对32bit设备的优化（允许oraja在设置中更改全局采样率，混音部分改为int32_t，预分配buffer等）
 
 ## How does the library work
 
