@@ -184,12 +184,19 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
                 it->m_cur_frame = 0;
                 it->m_resampler.reset();
             } else {
-                it = m_sounds.erase(it);
+                it->m_marked_for_delete = true;  // mark for batch delete instead of immediate erase
+                ++it;
             }
         } else {
-            it++;
+            ++it;
         }
     }
+    // Batch delete marked sounds (single O(n) instead of per-sound O(n))
+    m_sounds.erase(
+        std::remove_if(m_sounds.begin(), m_sounds.end(),
+                       [](const sound& s) { return s.m_marked_for_delete; }),
+        m_sounds.end());
+
     m_rendering_flag.clear(std::memory_order_release);
 }
 

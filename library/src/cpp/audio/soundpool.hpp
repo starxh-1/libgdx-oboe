@@ -67,6 +67,7 @@ private:
         bool m_looping;
         pan_effect m_pan;
         resampler m_resampler;
+        bool m_marked_for_delete{false};  // for mark-and-delete optimization
     };
 
     sound gen_sound(float volume, float pan, float speed, bool loop);
