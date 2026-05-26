@@ -30,9 +30,7 @@ soundpool::soundpool(const data_t &pcm, int8_t channels)
 void soundpool::do_by_id(long id, const std::function<void(
         std::vector<soundpool::sound>::iterator)> &callback) {
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-#if IS_LOW_POWER_DEVICE
-        std::this_thread::yield();
-#endif
+        ;  // pure spin for lowest latency
     }
     auto iter = std::find_if(m_sounds.begin(), m_sounds.end(), [id](const soundpool::sound &sound) {
         return sound.m_id == id;
@@ -80,9 +78,7 @@ long soundpool::play(float volume, float speed, float pan, bool loop) {
 
 void soundpool::pause() {
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-#if IS_LOW_POWER_DEVICE
-        std::this_thread::yield();
-#endif
+        ;  // pure spin for lowest latency
     }
     for (auto &sound : m_sounds) {
         sound.m_paused = true;
@@ -96,9 +92,7 @@ void soundpool::pause(long id) {
 
 void soundpool::resume() {
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-#if IS_LOW_POWER_DEVICE
-        std::this_thread::yield();
-#endif
+        ;  // pure spin for lowest latency
     }
     for (auto &sound : m_sounds) {
         sound.m_paused = false;
@@ -112,9 +106,7 @@ void soundpool::resume(long id) {
 
 void soundpool::stop() {
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-#if IS_LOW_POWER_DEVICE
-        std::this_thread::yield();
-#endif
+        ;  // pure spin for lowest latency
     }
     m_sounds.clear();
     m_rendering_flag.clear(std::memory_order_release);
@@ -150,9 +142,7 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
             limit_up = std::numeric_limits<int16_t>::max();
 
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-#if IS_LOW_POWER_DEVICE
-        std::this_thread::yield();
-#endif
+        ;  // pure spin for lowest latency
     }
 
 #if IS_LOW_POWER_DEVICE
