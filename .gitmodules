@@ -1,18 +1,18 @@
 [submodule "dependencies/oboe"]
 	path = library/dependencies/oboe
-	url = https://github.com/google/oboe.git
+	url = https://gitee.com/mirrors_google/oboe.git
 [submodule "dependencies/fmt"]
 	path = library/dependencies/fmt
-	url = https://github.com/fmtlib/fmt.git
+	url = https://gitee.com/mirrors/fmt.git
 [submodule "library/dependencies/frozen_string"]
 	path = library/dependencies/frozen_string
-	url = https://github.com/rhysd/FrozenString.git
+	url = https://gitclone.com/github.com/rhysd/FrozenString.git
 [submodule "library/dependencies/libsamplerate"]
 	path = library/dependencies/libsamplerate
-	url = https://github.com/erikd/libsamplerate.git
+	url = https://gitee.com/mirrors/libsamplerate.git
 [submodule "library/dependencies/result"]
 	path = library/dependencies/result
-	url = git@github.com:oktal/result.git
+	url = https://gitclone.com/github.com/oktal/result.git
 [submodule "library/dependencies/ffmpeg"]
 	path = library/dependencies/ffmpeg
-	url = git://source.ffmpeg.org/ffmpeg.git
+	url = https://gitee.com/mirrors/ffmpeg.git
