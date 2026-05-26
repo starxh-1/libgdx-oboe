@@ -1,3 +1,5 @@
+// For Mainland China these links will be faster, otherwise use the original one from barsoosayque's
+
 [submodule "dependencies/oboe"]
 	path = library/dependencies/oboe
 	url = https://gitee.com/mirrors_google/oboe.git
