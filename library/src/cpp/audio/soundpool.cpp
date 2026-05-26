@@ -17,9 +17,7 @@ soundpool::soundpool(const data_t &pcm, int8_t channels)
         , m_channels(channels)
         , m_pcm(to_float(pcm))
         , m_rendering_flag(false)
-#if IS_LOW_POWER_DEVICE
         , m_pending_flag(false)
-#endif
 {
 #if IS_LOW_POWER_DEVICE
     // 32-bit: pre-allocate to avoid realloc per frame in render()
@@ -55,8 +53,7 @@ soundpool::sound soundpool::gen_sound(float volume, float pan, float speed, bool
 }
 
 long soundpool::play(float volume, float speed, float pan, bool loop) {
-#if IS_LOW_POWER_DEVICE
-    // 32-bit: lock-free pending list. UI thread never blocks on audio.
+    // Lock-free pending list. UI thread never blocks on audio.
     sound s = gen_sound(volume, pan, speed, loop);
     long id = s.m_id;
     while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
@@ -65,15 +62,6 @@ long soundpool::play(float volume, float speed, float pan, bool loop) {
     m_pending.push_back(std::move(s));
     m_pending_flag.clear(std::memory_order_release);
     return id;
-#else
-    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
-        ;  // 64-bit: pure spin for lowest latency
-    }
-    m_sounds.emplace_back(gen_sound(volume, pan, speed, loop));
-    long id = m_sounds.back().m_id;
-    m_rendering_flag.clear(std::memory_order_release);
-    return id;
-#endif
 }
 
 void soundpool::pause() {
@@ -145,20 +133,16 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
         ;  // pure spin for lowest latency
     }
 
-#if IS_LOW_POWER_DEVICE
-    // 32-bit: consume pending list from UI thread (lock-free, only we hold the flag)
+    // Consume pending list from UI thread (lock-free, only we hold the flag)
     if (!m_pending.empty()) {
         for (auto& s : m_pending) {
             m_sounds.push_back(std::move(s));
         }
         m_pending.clear();
     }
-#endif
 
     int prevaluated = 0;
-#if !IS_LOW_POWER_DEVICE
     m_sample_buffer.reserve(num_frames * m_channels + 16);
-#endif
     for (auto it = m_sounds.begin(); it != m_sounds.end();) {
         if (!it->m_paused) {
             auto iter = std::next(m_pcm.cbegin(), it->m_cur_frame * m_channels);

@@ -82,9 +82,7 @@ private:
 
     std::atomic_flag m_rendering_flag;
 
-#if IS_LOW_POWER_DEVICE
     // Lock-free pending list: UI thread appends, audio thread consumes in render()
     std::vector<sound> m_pending;
     std::atomic_flag m_pending_flag;
-#endif
 };
