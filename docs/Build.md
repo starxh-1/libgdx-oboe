@@ -9,7 +9,7 @@
 
 ```bash
 # Clone repository with dependencies
-$ git clone https://gitlab.com/barsoosayque/libgdx-oboe.git --recurse-submodules // 他这个在国内扒的速度实在是太慢了，建议还是找其他方法
+$ git clone https://github.com/starxh-1/libgdx-oboe.git --recurse-submodules
 $ cd libgdx-oboe
 
 # You should generate a ffmpeg/libavutil/avconfig.h file
