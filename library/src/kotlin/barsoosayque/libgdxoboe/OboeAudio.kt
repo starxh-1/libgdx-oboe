@@ -17,7 +17,7 @@ import com.badlogic.gdx.utils.GdxRuntimeException
  * Returns [GdxRuntimeException] on native errors */
 class OboeAudio(
     private val assetManager: AssetManager,
-    sampleRate: Int = 48000
+    sampleRate: Int = 44100
 ) : AndroidAudio {
     private var sharedAudioPlayer: NativeAudioPlayer = NativeAudioPlayer()
     private val disposables: MutableList<Disposable> = mutableListOf()

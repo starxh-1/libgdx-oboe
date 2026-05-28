@@ -35,6 +35,9 @@ public:
     /// Resume playing audio.
     void resume() { m_engine.resume(); }
 
+    /// Get the actual sample rate used by the audio engine.
+    uint32_t sample_rate() const { return m_engine.sample_rate(); }
+
     /// Get audio session ID for Visualizer.
     int32_t get_audio_session_id() const { return m_engine.get_audio_session_id(); }
 

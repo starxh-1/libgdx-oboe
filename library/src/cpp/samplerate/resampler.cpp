@@ -38,17 +38,22 @@ void resampler::reset() {
     src_reset(m_state.get());
 }
 
-int resampler::process(const float* data_in, int input_frames, float* data_out, int requested_frames) {
+int resampler::process(std::vector<float>::const_iterator begin,
+                       std::vector<float>::const_iterator end,
+                       std::vector<float>::iterator output, int requested_frames) {
     if (m_state == nullptr) {
-        int frames = std::min(input_frames, requested_frames);
-        std::copy(data_in, data_in + frames * m_channels, data_out);
-        return frames;
+        m_len = std::distance(begin, end);
+        m_len = m_len < requested_frames * m_channels ? m_len : requested_frames * m_channels;
+        std::copy(begin, std::next(begin, m_len), output);
+        return m_len;
     } else {
-        m_data.data_in = data_in;
-        m_data.data_out = data_out;
-        m_data.input_frames = input_frames;
+        m_len = std::distance(begin, end) / m_channels;
+
+        m_data.data_in = &(*begin);
+        m_data.data_out = &(*output);
+        m_data.input_frames = m_len;
         m_data.output_frames = requested_frames;
-        m_data.end_of_input = requested_frames <= input_frames;
+        m_data.end_of_input = m_len <= requested_frames;
 
         if (int error = src_process(m_state.get(), &m_data)) {
             throw_exception("resampler::process error: {}", src_strerror(error));
@@ -56,10 +61,4 @@ int resampler::process(const float* data_in, int input_frames, float* data_out, 
 
         return m_data.input_frames_used;
     }
-}
-
-int resampler::process(std::vector<float>::const_iterator begin,
-                       std::vector<float>::const_iterator end,
-                       std::vector<float>::iterator output, int requested_frames) {
-    return process(&(*begin), std::distance(begin, end) / m_channels, &(*output), requested_frames);
 }

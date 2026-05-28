@@ -157,6 +157,20 @@ void oboe_engine::connect_to_device() {
          oboe::convertToText(m_stream->getState()),
          m_consecutive_errors);
 
+    // Read back the actual stream sample rate after opening. With
+    // setFormatConversionAllowed(true), some Oboe/Android versions may silently
+    // open at the hardware's native rate (e.g. 44100) instead of the requested
+    // rate (e.g. 48000). Using the real rate ensures decoded PCM matches playback
+    // speed. Fall back to requested rate if getSampleRate() is unavailable.
+    auto actual_rate = static_cast<uint32_t>(m_stream->getSampleRate());
+    if (actual_rate > 0) {
+        if (actual_rate != m_sample_rate) {
+            info("Sample rate adjusted: requested={}, actual={}",
+                 m_sample_rate, actual_rate);
+        }
+        m_sample_rate = actual_rate;
+    }
+
     // Calculate buffer multiplier - 32-bit devices use 4, 64-bit uses 2
     int32_t burst_multiplier = IS_LOW_POWER_DEVICE ? 4 : 2;
     m_payload_size = m_stream->getFramesPerBurst() * burst_multiplier;

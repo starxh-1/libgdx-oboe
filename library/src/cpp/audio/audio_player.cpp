@@ -15,7 +15,7 @@ int64_t k_limit_up = std::numeric_limits<int16_t>::max();
 }
 
 audio_player::audio_player()
-    : audio_player(48000) {
+    : audio_player(44100) {
 }
 
 audio_player::audio_player(uint32_t sample_rate)

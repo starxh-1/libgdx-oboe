@@ -17,7 +17,7 @@
 #include "../audio/music.hpp"
 #include "../audio/soundpool.hpp"
 
-uint32_t g_audio_sample_rate = 48000;
+uint32_t g_audio_sample_rate = 44100;
 
 namespace {
     constexpr std::string_view k_shared_player = "sharedAudioPlayer";
@@ -28,7 +28,7 @@ inline audio_player* get_or_create_shared_player(JNIEnv *env, jobject self) {
     if (auto player = get_var_as<audio_player>(env, self, k_shared_player)) {
         return player;
     } else {
-        auto* new_player = new audio_player(g_audio_sample_rate);
+        auto* new_player = new audio_player(44100);
         new_player->resume();
         set_var_as(env, self, k_shared_player, new_player);
         return new_player;
@@ -101,6 +101,9 @@ OBOEAUDIO_METHOD(jlong, createMusicFromPath)(JNIEnv *env, jobject self, jstring 
 OBOEAUDIO_METHOD(jshortArray, decodeToPCM)(JNIEnv *env, jobject self, jstring path) {
     std::string native_path = jni_utf8_string(env, path);
 
+    // Ensure shared player exists before decoding (engine at 44100Hz)
+    get_or_create_shared_player(env, self);
+
     auto decoder = decoder_bundle::create(native_path, g_audio_sample_rate)
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
@@ -149,7 +152,7 @@ OBOEAUDIO_METHOD(void, pause)(JNIEnv *env, jobject self) {
 }
 
 OBOEAUDIO_METHOD(void, nativeInit)(JNIEnv *env, jobject self, jint sampleRate) {
-    g_audio_sample_rate = static_cast<uint32_t>(sampleRate);
+    g_audio_sample_rate = 44100;
 }
 
 OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *env, jobject self) {

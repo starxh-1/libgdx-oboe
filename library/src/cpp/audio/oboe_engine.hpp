@@ -21,7 +21,7 @@ public:
     };
 public:
     /// Opening audio stream with specified number of channels and sample rate
-    oboe_engine(mode mode, uint8_t = 2, uint32_t = 48000);
+    oboe_engine(mode mode, uint8_t = 2, uint32_t = 44100);
 
     /// Closing audio stream
     ~oboe_engine();
@@ -50,7 +50,7 @@ public:
     /// Get size of buffer in samples.
     uint32_t payload_size() const;
 
-    /// Get the actual sample rate of the audio stream.
+    /// Get the actual sample rate of the audio stream (updated after stream opens).
     uint32_t sample_rate() const { return m_sample_rate; }
 
     /// Get the total number of frames read from the stream since start.
