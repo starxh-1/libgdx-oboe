@@ -91,8 +91,8 @@ FFMPEG_FLAGS="
 --enable-encoder=flac
 --enable-libmp3lame
 --enable-libvorbis
---enable-demuxer=wav,ogg,pcm*,mp3,flac
---enable-decoder=vorbis,opus,wav,mp3*,pcm*,flac
+--enable-demuxer=wav,ogg,pcm*,mp3,flac,adpcm*,mjpeg
+--enable-decoder=vorbis,opus,wav,mp3*,pcm*,flac,adpcm*,mjpeg,png
 "
 
 # =============== Option handle ==============
