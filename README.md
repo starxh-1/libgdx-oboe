@@ -44,6 +44,7 @@ class AndroidLauncher : AndroidApplication() {
 
 - Spectrum Analyzer support (with KissFFT) 音频频谱
 - 大量针对32bit设备的优化（混音部分改为int32_t，预分配buffer等）
+- 添加了FLAC, ADPCM支持 Added FLAC and ADPCM support
 
 ## How does the library work
 
