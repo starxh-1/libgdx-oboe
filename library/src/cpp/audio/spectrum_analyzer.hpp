@@ -8,7 +8,7 @@
 
 class spectrum_analyzer {
 public:
-    static constexpr int FFT_SIZE = 1024;
+    static constexpr int FFT_SIZE = 512;
     static constexpr int BANDS = 32;
 
     spectrum_analyzer() : m_write_pos(0) {
