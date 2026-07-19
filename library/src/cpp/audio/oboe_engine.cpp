@@ -26,14 +26,6 @@ inline bool check(oboe::Result result, std::string_view msg) {
     }
     return true;
 }
-
-int get_api_level() {
-    char sdk_version[PROP_VALUE_MAX];
-    if (__system_property_get("ro.build.version.sdk", sdk_version) > 0) {
-        return atoi(sdk_version);
-    }
-    return 0;
-}
 }
 
 oboe_engine::oboe_engine(mode mode, uint8_t channels, uint32_t sample_rate)
@@ -123,18 +115,11 @@ void oboe_engine::connect_to_device() {
     m_last_reconnect_time = now;
 
     bool success = false;
-    int api_level = get_api_level();
 
-    // Strategy 1: AAudio (unless fallbacked)
+    // Strategy 1: AAudio Shared only. Exclusive bypasses the system mixer, so
+    // screen recorders and MediaProjection cannot capture this app's audio.
     if (!m_use_opensl_fallback) {
-        // Android 10 (API 29) specific stability: Shared AAudio is often better than Exclusive
-        if (api_level == 29) {
-            if (try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) success = true;
-            else if (try_open(oboe::SharingMode::Exclusive, oboe::AudioApi::AAudio)) success = true;
-        } else {
-            if (try_open(oboe::SharingMode::Exclusive, oboe::AudioApi::AAudio)) success = true;
-            else if (try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) success = true;
-        }
+        if (try_open(oboe::SharingMode::Shared, oboe::AudioApi::AAudio)) success = true;
     }
 
     // Strategy 2: OpenSL ES (Universal fallback)
