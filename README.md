@@ -1,5 +1,7 @@
 # libGDX Oboe
 
+> **Upstream**: [barsoosayque/libgdx-oboe](https://github.com/barsoosayque/libgdx-oboe) — original source of this project.
+
 [![libGDX](https://img.shields.io/badge/libGDX-1.13.1-yellow.svg)](https://github.com/libgdx/libgdx/releases/tag/1.13.1)
 [![oboe](https://img.shields.io/badge/oboe-1.10.0-yellow.svg)](https://github.com/google/oboe/releases/tag/1.10.0)
 
