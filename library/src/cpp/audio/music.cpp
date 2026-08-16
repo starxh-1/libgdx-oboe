@@ -98,25 +98,21 @@ void music::render(int16_t *stream, uint32_t frames) {
                 m_on_complete();
         }
 
-        // wait for buffer with timeout to prevent deadlock
-        // 32-bit low memory devices (like APQ8064) get 1000ms to avoid BGM cutoff
-        bool buffer_ready = m_executor.wait_for(std::chrono::milliseconds(sizeof(void*) == 4 ? 1000 : 100));
-
-        if (buffer_ready) {
-            while (m_buffer_swap.test_and_set(std::memory_order_acquire));
-            swap_buffers();
-            if (m_playing) {
-                if (m_looping && m_decoder->is_eof()) {
-                    m_decoder->seek(0);
-                }
-                m_executor.queue();
+        // wait for buffer in case there was no position reset
+        m_executor.wait();
+        swap_buffers();
+        if (m_playing) {
+            if (m_looping && m_decoder->is_eof()) {
+                m_decoder->seek(0);
             }
-            // render additional pcm to fill full stream
-            int16_t remain = frames - frames_to_process;
-            raw_render(stream + frames_to_process * m_channels, remain);
-            m_buffer_swap.clear(std::memory_order_release);
+            m_executor.queue();
         }
-        // If timeout, just skip - the existing m_main_pcm has remaining data to use
+
+        // render additional pcm to fill full stream
+        while (m_buffer_swap.test_and_set(std::memory_order_acquire));
+        int16_t remain = frames - frames_to_process;
+        raw_render(stream + frames_to_process * m_channels, remain);
+        m_buffer_swap.clear(std::memory_order_release);
     }
 }
 

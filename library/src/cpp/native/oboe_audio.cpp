@@ -1,8 +1,6 @@
 #include "oboe_audio.hpp"
 
 #include <memory>
-#include "../audio/audio_config.hpp"
-#include "../audio/oboe_engine.hpp"
 #include "../audio/oboe_engine.hpp"
 #include "../utility/var.hpp"
 #include "../utility/log.hpp"
@@ -16,8 +14,6 @@
 #include "../audio/audio_player.hpp"
 #include "../audio/music.hpp"
 #include "../audio/soundpool.hpp"
-
-uint32_t g_audio_sample_rate = 44100;
 
 namespace {
     constexpr std::string_view k_shared_player = "sharedAudioPlayer";
@@ -64,7 +60,7 @@ inline std::unique_ptr<audio_decoder> fromAsset(JNIEnv *env, jobject self, jobje
     std::string native_path = jni_utf8_string(env, path);
 
     return internal_asset::create(native_path, native_manager)
-            .and_then([](internal_asset &&asset) { return decoder_bundle::create(asset, g_audio_sample_rate); })
+            .and_then([](internal_asset &&asset) { return decoder_bundle::create(asset); })
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
             })
@@ -77,7 +73,7 @@ inline std::unique_ptr<audio_decoder> fromAsset(JNIEnv *env, jobject self, jobje
 inline std::unique_ptr<audio_decoder> fromPath(JNIEnv *env, jobject self, jstring path) {
     std::string native_path = jni_utf8_string(env, path);
 
-    return decoder_bundle::create(native_path, g_audio_sample_rate)
+    return decoder_bundle::create(native_path)
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
             })
@@ -104,7 +100,7 @@ OBOEAUDIO_METHOD(jshortArray, decodeToPCM)(JNIEnv *env, jobject self, jstring pa
     // Ensure shared player exists before decoding (engine at 44100Hz)
     get_or_create_shared_player(env, self);
 
-    auto decoder = decoder_bundle::create(native_path, g_audio_sample_rate)
+    auto decoder = decoder_bundle::create(native_path)
             .map([](decoder_bundle &&bundle) {
                 return std::make_unique<audio_decoder>(std::move(bundle));
             })
@@ -152,7 +148,7 @@ OBOEAUDIO_METHOD(void, pause)(JNIEnv *env, jobject self) {
 }
 
 OBOEAUDIO_METHOD(void, nativeInit)(JNIEnv *env, jobject self, jint sampleRate) {
-    g_audio_sample_rate = 44100;
+    // No-op: sample rate is fixed at 44100 to match upstream decoder_bundle.
 }
 
 OBOEAUDIO_METHOD(jint, getAudioSessionId)(JNIEnv *env, jobject self) {
