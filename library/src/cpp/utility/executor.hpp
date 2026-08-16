@@ -4,74 +4,51 @@
 #include <mutex>
 #include <thread>
 #include <condition_variable>
-#include <functional>
-#include <chrono>
 
 class executor {
 public:
     executor(std::function<void()> job)
             : m_run(true)
-            , m_done(true) // Start as done
+            , m_done(false)
             , m_job(std::move(job))
-            , m_worker(&executor::run, this) {
-        // Note: setpriority removed - caused threading issues on some Android devices
-    }
+            , m_worker(std::bind(&executor::run, this)) { }
 
     ~executor() {
-        m_run.store(false);
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_cond.notify_all();
-        }
-        if (m_worker.joinable()) {
-            m_worker.join();
-        }
+        m_run.clear();
+        m_cond.notify_all();
+        m_worker.join();
     }
 
     void queue() {
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_done.store(false);
-        }
+        m_done.store(false);
         m_cond.notify_all();
     }
 
     void wait() {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_cond_done.wait(lock, [this] { return m_done.load(); });
-    }
-
-    // Wait with timeout, returns true if done, false if timeout
-    template<typename Rep, typename Period>
-    bool wait_for(const std::chrono::duration<Rep, Period>& timeout) {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        return m_cond_done.wait_for(lock, timeout, [this] { return m_done.load(); });
+        while (!m_done.load()) {
+            m_cond.notify_all();
+        }
     }
 
 private:
     void run() {
-        while (m_run.load()) {
+        while (m_run.test_and_set()) {
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
-                m_cond.wait(lock, [this] { return !m_run.load() || !m_done.load(); });
-                if (!m_run.load()) break;
+                m_cond.wait(lock);
             }
 
-            m_job();
-
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
+            if (!m_done.load()) {
+                m_job();
                 m_done.store(true);
             }
-            m_cond_done.notify_all();
         }
     }
 
-    std::atomic<bool> m_run;
-    std::atomic<bool> m_done;
+    std::atomic_flag m_run;
+    std::atomic_bool m_done;
     std::function<void()> m_job;
     std::thread m_worker;
     std::mutex m_mutex;
     std::condition_variable m_cond;
-    std::condition_variable m_cond_done;
 };

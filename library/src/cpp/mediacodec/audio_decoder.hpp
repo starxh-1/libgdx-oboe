@@ -2,7 +2,7 @@
 
 #include <vector>
 #include <string_view>
-#include <mutex>
+#include <atomic>
 
 #include "internal_asset.hpp"
 #include "ffmpeg_utils.hpp"
@@ -41,7 +41,7 @@ private:
 
     bool m_eof = false;
 
-    std::mutex m_mutex;
+    std::atomic_flag m_use_flag = false;
     int64_t m_target_ts = -1;
 
     format_context_ptr m_format_ctx;

@@ -80,7 +80,7 @@ codec_result create_codec(const format_context_ptr &format_ctx) {
     }
 }
 
-swr_result create_swr(const codec_context_ptr &codec_ctx, int stream_index, int target_sample_rate) {
+swr_result create_swr(const codec_context_ptr &codec_ctx, int stream_index) {
     frame_ptr iframe = make_frame();
     av_channel_layout_copy( &iframe->ch_layout, &codec_ctx->ch_layout );
     iframe->sample_rate = codec_ctx->sample_rate;
@@ -92,7 +92,7 @@ swr_result create_swr(const codec_context_ptr &codec_ctx, int stream_index, int 
     frame_ptr oframe = make_frame();
     // TODO: remove hardcoded channels
     oframe->ch_layout = AV_CHANNEL_LAYOUT_STEREO;
-    oframe->sample_rate = target_sample_rate;
+    oframe->sample_rate = 44100;
     oframe->format = AV_SAMPLE_FMT_S16;
 
     debug("audio_decoder: oframe config:\nsample_rate: {}\nformat: {}\nchannels: {}",
@@ -122,19 +122,19 @@ swr_result create_swr(const codec_context_ptr &codec_ctx, int stream_index, int 
 }
 }
 
-decoder_bundle_result decoder_bundle::create(std::string_view filename, int target_sample_rate) {
+decoder_bundle_result decoder_bundle::create(std::string_view filename) {
     decoder_bundle bundle;
 
     bundle.m_format_ctx = TRY(create_context(fmt::format("file:{}", filename), nullptr));
     int stream_index = 0;
     std::tie(bundle.m_codec_ctx, stream_index) = TRY(create_codec(bundle.m_format_ctx));
     std::tie(bundle.m_swr_ctx, bundle.m_oframe, bundle.m_iframe, bundle.m_packet) = TRY(
-            create_swr(bundle.m_codec_ctx, stream_index, target_sample_rate));
+            create_swr(bundle.m_codec_ctx, stream_index));
 
     return ok(std::move(bundle));
 }
 
-decoder_bundle_result decoder_bundle::create(internal_asset &asset, int target_sample_rate) {
+decoder_bundle_result decoder_bundle::create(internal_asset &asset) {
     decoder_bundle bundle;
 
     AVFormatContext *format_ctx = avformat_alloc_context();
@@ -148,7 +148,7 @@ decoder_bundle_result decoder_bundle::create(internal_asset &asset, int target_s
     std::tie(bundle.m_codec_ctx, stream_index) = TRY(create_codec(bundle.m_format_ctx));
 
     std::tie(bundle.m_swr_ctx, bundle.m_oframe, bundle.m_iframe, bundle.m_packet) = TRY(
-            create_swr(bundle.m_codec_ctx, stream_index, target_sample_rate));
+            create_swr(bundle.m_codec_ctx, stream_index));
 
     return ok(std::move(bundle));
 }

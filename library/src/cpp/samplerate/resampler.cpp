@@ -53,7 +53,7 @@ int resampler::process(std::vector<float>::const_iterator begin,
         m_data.data_out = &(*output);
         m_data.input_frames = m_len;
         m_data.output_frames = requested_frames;
-        m_data.end_of_input = m_len <= requested_frames;
+        m_data.end_of_input = requested_frames <= m_len;
 
         if (int error = src_process(m_state.get(), &m_data)) {
             throw_exception("resampler::process error: {}", src_strerror(error));

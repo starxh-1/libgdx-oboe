@@ -18,7 +18,7 @@ audio_decoder::audio_decoder(decoder_bundle &&bundle)
         , m_packet(std::move(bundle.m_packet)) { }
 
 audio_decoder::buffer audio_decoder::decode(int samples) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    while (m_use_flag.test_and_set(std::memory_order_acquire));
     int64_t delay = 0;
     int processed_samples = 0, error = 0, data_size;
     bool read_eof = false, decode_eof = false, request_more = true;
@@ -130,6 +130,7 @@ audio_decoder::buffer audio_decoder::decode(int samples) {
     if ((m_eof = read_eof & decode_eof)) {
         avcodec_flush_buffers(m_codec_ctx.get());
     }
+    m_use_flag.clear(std::memory_order_release);
 
     return std::move(m_buffer);
 }
@@ -139,7 +140,7 @@ audio_decoder::buffer audio_decoder::decode() {
 }
 
 void audio_decoder::seek(float seconds) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    while (m_use_flag.test_and_set(std::memory_order_acquire));
 
     auto stream = m_format_ctx->streams[m_packet->stream_index];
     m_target_ts = av_rescale_q(seconds * AV_TIME_BASE, AV_TIME_BASE_Q, stream->time_base);
@@ -151,6 +152,7 @@ void audio_decoder::seek(float seconds) {
                                 AVSEEK_FLAG_BACKWARD)) {
         warn("audio_decoder: Error while seeking ({})", av_err_str(error));
     }
+    m_use_flag.clear(std::memory_order_release);
 }
 
 bool audio_decoder::is_eof() const {
