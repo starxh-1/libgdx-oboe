@@ -1,16 +1,16 @@
 #include "music.hpp"
 #include <iterator>
 #include <cmath>
-#include <chrono>
 
 music::music(std::unique_ptr<audio_decoder> &&decoder, int8_t channels)
         : m_pan(0)
         , m_looping(false)
-        , m_cache_size((sizeof(void*) == 4 ? 32 : 16) * 1024 * channels)
+        , m_cache_size(16 * 1024 * channels)
         , m_volume(1)
         , m_channels(channels)
         , m_decoder(std::move(decoder))
         , m_current_frame(0)
+        , m_buffer_swap(false)
         , m_executor([&]() { fill_second_buffer(); }) {
     m_main_pcm.reserve(m_cache_size);
     stop();
@@ -46,8 +46,7 @@ void music::position(float position) {
     while (m_buffer_swap.test_and_set(std::memory_order_acquire));
     m_executor.wait();
     m_decoder->seek(position);
-    m_position.store(position, std::memory_order_release);
-    m_is_synced.store(false, std::memory_order_release);
+    m_position = position;
     fill_second_buffer();
     swap_buffers();
     m_executor.queue();
@@ -68,21 +67,18 @@ void music::raw_render(int16_t *stream, uint32_t frames) {
         stream[sample] += *iter * m_volume * m_pan.modulation(sample % m_channels);
     }
 
-    // Position is now calculated from engine timing in sync_timing()
-    // Don't update m_position here to avoid drift
+    // TODO remove hard-coded stuff
+    m_position += frames / 44100.0f;
     m_current_frame += frames;
 }
 
 void music::render(int16_t *stream, uint32_t frames) {
     if (!m_playing)
         return;
-
-    uint32_t frames_to_process;
-    int32_t frames_in_pcm;
-
     while (m_buffer_swap.test_and_set(std::memory_order_acquire));
-    frames_in_pcm = m_main_pcm.size() / m_channels;
-    frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
+
+    int32_t frames_in_pcm = m_main_pcm.size() / m_channels;
+    uint32_t frames_to_process = std::clamp(frames_in_pcm - m_current_frame, 0,
                                             static_cast<int32_t>(frames));
 
     raw_render(stream, frames_to_process);
@@ -92,8 +88,7 @@ void music::render(int16_t *stream, uint32_t frames) {
         bool end = m_eof && m_current_frame >= frames_in_pcm;
         if (end) {
             m_playing = m_looping;
-            m_position.store(0, std::memory_order_release);
-            m_is_synced.store(false, std::memory_order_release);
+            m_position = 0;
             if (m_on_complete && !m_looping)
                 m_on_complete();
         }
@@ -113,32 +108,5 @@ void music::render(int16_t *stream, uint32_t frames) {
         int16_t remain = frames - frames_to_process;
         raw_render(stream + frames_to_process * m_channels, remain);
         m_buffer_swap.clear(std::memory_order_release);
-    }
-}
-
-void music::sync_timing(uint32_t sample_rate, uint64_t engine_frames) {
-    if (!m_playing) {
-        // When not playing, position stays at current value
-        return;
-    }
-
-    bool was_synced = m_is_synced.load(std::memory_order_acquire);
-    if (!was_synced) {
-        // First sync: initialize baseline
-        m_sample_rate.store(sample_rate, std::memory_order_release);
-        m_engine_frames_at_sync.store(engine_frames, std::memory_order_release);
-        m_position_at_sync.store(m_position.load(std::memory_order_acquire), std::memory_order_release);
-        m_is_synced.store(true, std::memory_order_release);
-    } else {
-        // Compute new position based on engine frames
-        uint64_t current_engine_frames = m_engine_frames_at_sync.load(std::memory_order_acquire);
-        uint32_t current_sample_rate = m_sample_rate.load(std::memory_order_acquire);
-        float current_position_at_sync = m_position_at_sync.load(std::memory_order_acquire);
-
-        uint64_t frames_delta = engine_frames - current_engine_frames;
-        float time_delta = static_cast<float>(frames_delta) / static_cast<float>(current_sample_rate);
-        float new_position = current_position_at_sync + time_delta;
-
-        m_position.store(new_position, std::memory_order_release);
     }
 }

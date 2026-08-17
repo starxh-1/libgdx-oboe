@@ -3,8 +3,6 @@
 #include <oboe/Oboe.h>
 #include <vector>
 #include <atomic>
-#include <chrono>
-#include <mutex>
 
 /// Oboe stream wrapper, with comfortable high level methods.
 class oboe_engine : protected oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
@@ -51,15 +49,6 @@ public:
     /// Get size of buffer in samples.
     uint32_t payload_size() const;
 
-    /// Get the actual sample rate of the audio stream (updated after stream opens).
-    uint32_t sample_rate() const { return m_sample_rate.load(std::memory_order_acquire); }
-
-    /// Get the total number of frames read from the stream since start.
-    uint64_t frames_read() const { return m_frames_read.load(std::memory_order_acquire); }
-
-    /// Get audio session ID for Visualizer.
-    int32_t get_audio_session_id() const;
-
 private:
     // oboe::AudioStreamDataCallback interface
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *, void *, int32_t);
@@ -68,34 +57,14 @@ private:
 
 private:
     void connect_to_device();
-    void rebuild_stream();
 
-    // Stream pointer is mutated by reconnect paths (constructor thread,
-    // Oboe error thread, resume/stop callers) and dereferenced by the audio
-    // callback. m_stream_mutex serializes swap-in; the audio callback takes
-    // its own shared_ptr snapshot so the previous stream outlives any
-    // in-flight callback when the swap-then-close sequence runs.
-    mutable std::mutex m_stream_mutex;
-    std::shared_ptr<oboe::AudioStream> m_stream;
+    std::unique_ptr<oboe::AudioStream> m_stream;
     mode m_mode;
 
     on_async_write_t m_on_async_write;
 
     uint8_t m_channels;
-
-    // Read from the audio callback, mutated by connect_to_device on other
-    // threads. Atomic to avoid torn 64-bit reads on ARM and to give the
-    // audio thread a lock-free fast path for the frame counter.
-    std::atomic<uint32_t> m_sample_rate{0};
-    std::atomic<uint32_t> m_payload_size{0};
-    std::atomic<uint64_t> m_frames_read{0};
-    std::atomic<bool> m_is_playing{false};
-
-    // Resilience state. connect_to_device is invoked from both the
-    // constructor thread and the Oboe error thread; m_reconnect_mutex
-    // serializes access to the loop-detection fields.
-    std::mutex m_reconnect_mutex;
-    int m_consecutive_errors = 0;
-    bool m_use_opensl_fallback = false;
-    std::chrono::steady_clock::time_point m_last_reconnect_time;
+    uint32_t m_sample_rate;
+    uint32_t m_payload_size;
+    bool m_is_playing;
 };
