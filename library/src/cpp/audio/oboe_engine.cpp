@@ -17,7 +17,16 @@ inline bool check(oboe::Result result, std::string_view msg) {
     }
     return true;
 }
+/// Clears a bool flag when leaving the scope (reentrancy guard helper).
+struct flag_reset {
+    bool& flag;
+    ~flag_reset() { flag = false; }
+};
 }
+
+// Process-wide latch: once AAudio has been proven broken on this device/ROM it
+// stays broken for the lifetime of the process, across every engine instance.
+std::atomic<bool> oboe_engine::s_opensl_fallback{false};
 
 oboe_engine::oboe_engine(mode mode, uint8_t channels, uint32_t sample_rate)
         : oboe::AudioStreamDataCallback()
@@ -26,19 +35,64 @@ oboe_engine::oboe_engine(mode mode, uint8_t channels, uint32_t sample_rate)
         , m_channels(channels)
         , m_sample_rate(sample_rate)
         , m_payload_size(0)
-        , m_is_playing(false) {
+        , m_is_playing(false)
+        , m_consecutive_errors(0)
+        , m_last_reconnect_time(std::chrono::steady_clock::now()) {
     connect_to_device();
 }
 
 oboe_engine::~oboe_engine() {
-    if (!m_stream)
+    std::unique_ptr<oboe::AudioStream> stream;
+    {
+        std::lock_guard<std::mutex> lock(m_stream_mutex);
+        stream = std::move(m_stream);
+    }
+    if (!stream)
         return;
 
-    stop();
-    check(m_stream->close(), "Error closing stream: {}");
+    stream->requestStop();
+    check(stream->close(), "Error closing stream: {}");
 }
 
 void oboe_engine::connect_to_device() {
+    // Serialise against resume()/stop() so we never free m_stream underneath
+    // another thread. Recursive: Oboe can deliver onErrorAfterClose() on this
+    // same thread from inside close(), which would re-enter this method -- the
+    // m_reconnecting guard below stops that from recursing.
+    std::lock_guard<std::recursive_mutex> lifecycle(m_lifecycle_mutex);
+    if (m_reconnecting)
+        return;
+    m_reconnecting = true;
+    flag_reset reset{m_reconnecting};
+
+    // --- Loop detection and circuit breaker ---
+    // If we reconnect faster than once every 1.5s, count it; after 3 rapid
+    // reconnects force OpenSL ES to break an AAudio disconnect loop.
+    auto now = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_last_reconnect_time).count();
+
+    if (duration_ms < 1500) {
+        m_consecutive_errors++;
+        if (m_consecutive_errors >= 3 && !s_opensl_fallback.exchange(true)) {
+            warn("Detected rapid reconnection loop ({} times in {}ms). "
+                 "Triggering OpenSL ES fallback.", m_consecutive_errors, duration_ms);
+        }
+    } else {
+        m_consecutive_errors = 0;
+    }
+    m_last_reconnect_time = now;
+
+    // Close any existing (disconnected) stream before opening a new one so we
+    // don't leak the previous handle.
+    {
+        std::lock_guard<std::mutex> lock(m_stream_mutex);
+        if (m_stream) {
+            m_stream->close();
+            m_stream.reset();
+        }
+    }
+
     // initialize Oboe audio stream
     oboe::AudioStreamBuilder builder;
     builder.setChannelCount(m_channels);
@@ -48,6 +102,11 @@ void oboe_engine::connect_to_device() {
     builder.setPerformanceMode(oboe::PerformanceMode::LowLatency);
     builder.setSharingMode(oboe::SharingMode::Shared);
     builder.setFormatConversionAllowed(true);
+    // Prefer AAudio; fall back to OpenSL ES either on open failure or once the
+    // circuit breaker (see resume()/connect_to_device()) has latched it.
+    builder.setAudioApi(s_opensl_fallback.load()
+                        ? oboe::AudioApi::OpenSLES
+                        : oboe::AudioApi::AAudio);
 
     builder.setUsage(oboe::Usage::Game);
     switch(m_mode) {
@@ -67,10 +126,35 @@ void oboe_engine::connect_to_device() {
         break;
     }
 
-    check(builder.openStream(ptrptr(m_stream)), "Error opening stream: {}");
+    oboe::Result result = builder.openStream(ptrptr(m_stream));
+    if (result != oboe::Result::OK || !m_stream ||
+        m_stream->getState() == oboe::StreamState::Disconnected) {
+        if (m_stream) { m_stream->close(); m_stream.reset(); }
+        if (!s_opensl_fallback.exchange(true)) {
+            warn("AAudio initialization failed, falling back to OpenSL ES.");
+            builder.setAudioApi(oboe::AudioApi::OpenSLES);
+            result = builder.openStream(ptrptr(m_stream));
+        }
+        if (result != oboe::Result::OK || !m_stream) {
+            error("FATAL: All audio backend initialization failed!");
+            return;
+        }
+    }
+
+    // Read back the actual stream sample rate. With setFormatConversionAllowed(true),
+    // Oboe may open at the hardware native rate instead of the requested one.
+    auto actual_rate = static_cast<uint32_t>(m_stream->getSampleRate());
+    if (actual_rate > 0) {
+        m_sample_rate = actual_rate;
+    }
 
     m_payload_size = m_stream->getFramesPerBurst() * 2;
     m_stream->setBufferSizeInFrames(static_cast<int32_t>(m_payload_size));
+
+    info("Stream opened: API={}, State={}, OpenSL_fallback={}",
+         oboe::convertToText(m_stream->getAudioApi()),
+         oboe::convertToText(m_stream->getState()),
+         s_opensl_fallback.load());
 }
 
 void oboe_engine::onErrorAfterClose(oboe::AudioStream *self, oboe::Result error) {
@@ -110,23 +194,61 @@ oboe::DataCallbackResult oboe_engine::onAudioReady(oboe::AudioStream *self, void
 }
 
 void oboe_engine::resume() {
-    if (!m_stream)
-        return;
+    // At most two attempts: one on the current backend, and one after rebuilding
+    // the stream on OpenSL ES.
+    //
+    // This is the primary fallback trigger point. On ROMs with a broken AAudio
+    // service (e.g. API 29 Mokee) openStream() succeeds and the stream reports
+    // State::Open, and the failure only shows up here: requestStart() returns
+    // ErrorDisconnected / ErrorInvalidState / ErrorNull. Oboe hands that error
+    // straight back to us and never invokes onErrorAfterClose(), so a fallback
+    // that only lives in connect_to_device()/onErrorAfterClose() can never fire.
+    //
+    // Holding the lifecycle mutex across both attempts also guarantees the
+    // rebuild cannot free m_stream while another thread is inside requestStart().
+    std::lock_guard<std::recursive_mutex> lifecycle(m_lifecycle_mutex);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        oboe::AudioStream* stream = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_stream_mutex);
+            stream = m_stream.get();
+        }
+        if (!stream)
+            return;
 
-    debug("oboe_engine::resume. State: {}", oboe::convertToText(m_stream->getState()));
+        debug("oboe_engine::resume. State: {}", oboe::convertToText(stream->getState()));
 
-    if (check(m_stream->requestStart(), "Error starting stream: {}")) {
-        m_is_playing = true;
+        if (check(stream->requestStart(), "Error starting stream: {}")) {
+            m_is_playing = true;
+            return;
+        }
+
+        // requestStart() failed. Latch the fallback; exchange() returns the
+        // previous value, so if it was already true we are on OpenSL ES already
+        // (or another thread just switched) and retrying would loop forever.
+        if (s_opensl_fallback.exchange(true)) {
+            warn("requestStart() failed on OpenSL ES as well; giving up.");
+            return;
+        }
+
+        warn("requestStart() failed on AAudio; rebuilding the stream on OpenSL ES.");
+        connect_to_device();
     }
 }
 
 void oboe_engine::stop() {
-    if (!m_stream)
+    std::lock_guard<std::recursive_mutex> lifecycle(m_lifecycle_mutex);
+    oboe::AudioStream* stream = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_stream_mutex);
+        stream = m_stream.get();
+    }
+    if (!stream)
         return;
 
-    debug("stop::resume. State: {}", oboe::convertToText(m_stream->getState()));
+    debug("stop::resume. State: {}", oboe::convertToText(stream->getState()));
 
-    if (check(m_stream->requestStop(), "Error stopping stream: {}")) {
+    if (check(stream->requestStop(), "Error stopping stream: {}")) {
         m_is_playing = false;
     }
 }
@@ -135,11 +257,16 @@ void oboe_engine::blocking_write(const int16_t* pcm, size_t len) {
     android_assert(m_mode == mode::writing,
                    "engine not in writing mode, something went wrong.");
 
-    if (!m_stream)
+    oboe::AudioStream* stream = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_stream_mutex);
+        stream = m_stream.get();
+    }
+    if (!stream)
         return;
 
     int32_t len_in_frames = static_cast<int32_t>(len) / m_channels;
-    auto frames = m_stream->write(pcm, len_in_frames, std::numeric_limits<int64_t>::max());
+    auto frames = stream->write(pcm, len_in_frames, std::numeric_limits<int64_t>::max());
     check(frames, "Error while reading stream: {}");
 }
 
@@ -147,11 +274,16 @@ void oboe_engine::blocking_read(int16_t* buffer, size_t len) {
     android_assert(m_mode == mode::reading,
                    "engine not in writing mode, something went wrong.");
 
-    if (!m_stream)
+    oboe::AudioStream* stream = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_stream_mutex);
+        stream = m_stream.get();
+    }
+    if (!stream)
         return;
 
     int32_t len_in_frames = static_cast<int32_t>(len) / m_channels;
-    auto frames = m_stream->read(buffer, len_in_frames, std::numeric_limits<int64_t>::max());
+    auto frames = stream->read(buffer, len_in_frames, std::numeric_limits<int64_t>::max());
 
     check(frames, "Error while writing into stream: {}");
     if (frames && frames.value() < len_in_frames) {

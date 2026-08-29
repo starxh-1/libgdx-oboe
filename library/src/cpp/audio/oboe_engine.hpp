@@ -3,6 +3,8 @@
 #include <oboe/Oboe.h>
 #include <vector>
 #include <atomic>
+#include <chrono>
+#include <mutex>
 
 /// Oboe stream wrapper, with comfortable high level methods.
 class oboe_engine : protected oboe::AudioStreamDataCallback, oboe::AudioStreamErrorCallback {
@@ -67,4 +69,26 @@ private:
     uint32_t m_sample_rate;
     uint32_t m_payload_size;
     bool m_is_playing;
+
+    // OpenSL ES fallback state: circuit breaker for AAudio reconnection loops.
+    // Some devices/ROMs (e.g. API 29 custom ROMs) let AAudio open but then
+    // disconnect on requestStart(); without the fallback we loop forever on AAudio.
+    //
+    // NOTE: this latch is process-wide on purpose. The app destroys and
+    // recreates the whole engine (new Activity -> new OboeAudio -> new
+    // audio_player -> new oboe_engine), so a per-instance flag would be reset
+    // to false on every re-creation and the device would retry broken AAudio
+    // again and again. Once AAudio has proven broken, every engine in this
+    // process goes straight to OpenSL ES.
+    static std::atomic<bool> s_opensl_fallback;
+
+    int m_consecutive_errors;
+    std::chrono::steady_clock::time_point m_last_reconnect_time;
+    // Serialises stream lifecycle work (start / stop / rebuild) so a reconnect
+    // cannot free m_stream while another thread is still using it. Recursive
+    // because Oboe may deliver onErrorAfterClose() -- which rebuilds the stream
+    // -- synchronously on the same thread from inside requestStart()/close().
+    std::recursive_mutex m_lifecycle_mutex;
+    bool m_reconnecting = false;
+    std::mutex m_stream_mutex;
 };
