@@ -141,12 +141,16 @@ void oboe_engine::connect_to_device() {
         }
     }
 
-    // Read back the actual stream sample rate. With setFormatConversionAllowed(true),
-    // Oboe may open at the hardware native rate instead of the requested one.
-    auto actual_rate = static_cast<uint32_t>(m_stream->getSampleRate());
-    if (actual_rate > 0) {
-        m_sample_rate = actual_rate;
-    }
+    // Hardcode the engine's logical sample rate at the requested 44100 Hz
+    // regardless of what the underlying Oboe stream actually opened with.
+    // Oboe's FormatConversion pipeline (FilterAudioStream + SampleRateConverter)
+    // transparently bridges 44.1 kHz <-> device native rate on the way in/out
+    // of onAudioReady(), and `m_stream->getSampleRate()` on the parent
+    // FilterAudioStream returns the *requested* rate (44100), not the child
+    // device's native rate, so any "actual rate read-back" here is at best a
+    // no-op and at worst a foot-gun for code that later compares m_sample_rate
+    // against 44100. Locking it down matches upstream semantics exactly.
+    // (see upstream-libgdx-oboe fc66589 connect_to_device)
 
     m_payload_size = m_stream->getFramesPerBurst() * 2;
     m_stream->setBufferSizeInFrames(static_cast<int32_t>(m_payload_size));

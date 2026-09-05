@@ -82,30 +82,36 @@ audio_decoder::buffer audio_decoder::decode(int samples) {
         while (!decode_eof) {
             error = avcodec_receive_frame(m_codec_ctx.get(), m_iframe.get());
             if (error == 0) {
-                swr_config_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
-                do {
-                    error = swr_convert_frame(m_swr_ctx.get(), m_oframe.get(),
-                                            delay > 0 ? nullptr : m_iframe.get());
+                // Only configure the resampler when it is not initialized yet.
+                // swr_config_frame() unconditionally closes the context (swr_close),
+                // wiping the resampler's filter history and buffered delay. Calling
+                // it per decoded frame resets the conversion state at every frame
+                // boundary: harmless for 1:1 conversion (44100 Hz sources take the
+                // direct path with no resampler), but audible artifacts at each
+                // frame boundary when actually resampling (non-44100 Hz sources
+                // converted to the 44100 Hz standard).
+                if (!swr_is_initialized(m_swr_ctx.get())) {
+                    swr_config_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
+                }
+                error = swr_convert_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
+                if (error == AVERROR_INPUT_CHANGED || error == AVERROR_OUTPUT_CHANGED) {
+                    // Stream parameters changed mid-file: reconfigure once and retry.
+                    swr_config_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
+                    error = swr_convert_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
+                }
 
-                    if (error < 0) {
-                        warn("audio_decoder: Error converting demuxed data ({})", av_err_str(error));
-                    } else {
-                        if ((data_size = m_oframe->nb_samples * m_oframe->ch_layout.nb_channels) == 0) {
-                            // sometimes delay will return positive value, but there is nothing to be read
-                            break;
-                        }
+                if (error < 0) {
+                    warn("audio_decoder: Error converting demuxed data ({})", av_err_str(error));
+                } else if ((data_size = m_oframe->nb_samples * m_oframe->ch_layout.nb_channels) > 0) {
+                    auto begin = reinterpret_cast<int16_t *>(m_oframe->extended_data[0]),
+                            end = begin + data_size;
+                    std::move(begin, end, std::back_inserter(m_buffer));
+                    processed_samples += data_size;
+                }
 
-                        auto begin = reinterpret_cast<int16_t *>(m_oframe->extended_data[0]),
-                                end = begin + data_size;
-                        std::move(begin, end, std::back_inserter(m_buffer));
-                        processed_samples += data_size;
-                    }
-
-                    if (samples > 0 && processed_samples >= samples) {
-                        request_more = false;
-                    }
-                } while ((delay = swr_get_delay(m_swr_ctx.get(), m_oframe->sample_rate)) > 0);
-                delay = 0;
+                if (samples > 0 && processed_samples >= samples) {
+                    request_more = false;
+                }
             } else if (error == AVERROR(EAGAIN)) {
                 break;
             } else if (error == AVERROR_EOF) {
@@ -120,15 +126,31 @@ audio_decoder::buffer audio_decoder::decode(int samples) {
         av_packet_unref(m_packet.get());
     }
 
+    if ((m_eof = read_eof & decode_eof)) {
+        // Flush the resampler's internal delay once at real EOF so the tail
+        // of the sound is not cut off (a few filter taps worth of samples).
+        // Done before the caching step below so the flushed tail also honors
+        // the "samples" contract (excess goes to the cache).
+        while ((delay = swr_get_delay(m_swr_ctx.get(), m_oframe->sample_rate)) > 0) {
+            if (swr_convert_frame(m_swr_ctx.get(), m_oframe.get(), nullptr) < 0) {
+                break;
+            }
+            if ((data_size = m_oframe->nb_samples * m_oframe->ch_layout.nb_channels) == 0) {
+                break;
+            }
+            auto begin = reinterpret_cast<int16_t *>(m_oframe->extended_data[0]),
+                    end = begin + data_size;
+            std::move(begin, end, std::back_inserter(m_buffer));
+            processed_samples += data_size;
+        }
+        avcodec_flush_buffers(m_codec_ctx.get());
+    }
+
     if (samples > 0 && processed_samples > samples) {
         // cache anything past requested
         auto begin = std::next(m_buffer.begin(), samples), end = m_buffer.end();
         std::move(begin, end, std::back_inserter(m_cache));
         m_buffer.resize(samples);
-    }
-
-    if ((m_eof = read_eof & decode_eof)) {
-        avcodec_flush_buffers(m_codec_ctx.get());
     }
     m_use_flag.clear(std::memory_order_release);
 
@@ -147,6 +169,13 @@ void audio_decoder::seek(float seconds) {
 
     m_cache.clear();
     m_eof = false;
+    // Reset the resampler state (swr_init calls clear_context internally on an
+    // already-configured context): drop the ~half-a-filter worth of samples
+    // still buffered from before the seek, so playback resumes exactly at the
+    // target position instead of leaking a sub-millisecond of the old audio.
+    if (swr_is_initialized(m_swr_ctx.get())) {
+        swr_init(m_swr_ctx.get());
+    }
     avcodec_flush_buffers(m_codec_ctx.get());
     if (int error = av_seek_frame(m_format_ctx.get(), m_packet->stream_index, m_target_ts,
                                 AVSEEK_FLAG_BACKWARD)) {
