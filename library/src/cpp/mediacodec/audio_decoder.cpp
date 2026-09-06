@@ -17,6 +17,51 @@ audio_decoder::audio_decoder(decoder_bundle &&bundle)
         , m_oframe(std::move(bundle.m_oframe))
         , m_packet(std::move(bundle.m_packet)) { }
 
+int audio_decoder::ensure_out_capacity(int64_t samples) {
+    if (samples <= 0) {
+        samples = 1;
+    }
+
+    // Capacity of the currently allocated buffer, in frames.
+    if (m_oframe->linesize[0] > 0) {
+        const int bps = av_get_bytes_per_sample(static_cast<AVSampleFormat>(m_oframe->format));
+        const int ch = m_oframe->ch_layout.nb_channels;
+        if (bps > 0 && ch > 0) {
+            const int allocated = m_oframe->linesize[0] / (bps * ch);
+            if (allocated >= samples) {
+                return allocated;  // existing buffer is large enough, reuse it
+            }
+        }
+    }
+
+    // (Re)allocate. av_frame_get_buffer() needs an empty frame, and
+    // av_frame_unref() wipes the format fields -- save and restore them.
+    AVChannelLayout layout;
+    if (int error = av_channel_layout_copy(&layout, &m_oframe->ch_layout)) {
+        warn("audio_decoder: av_channel_layout_copy failed ({})", av_err_str(error));
+        return 0;
+    }
+    const int format = m_oframe->format;
+    const int rate = m_oframe->sample_rate;
+
+    av_frame_unref(m_oframe.get());
+    av_channel_layout_copy(&m_oframe->ch_layout, &layout);
+    m_oframe->format = format;
+    m_oframe->sample_rate = rate;
+    m_oframe->nb_samples = static_cast<int>(samples);
+    if (int error = av_frame_get_buffer(m_oframe.get(), 0)) {
+        warn("audio_decoder: Failed to allocate the resampler output frame ({})",
+             av_err_str(error));
+        av_channel_layout_uninit(&layout);
+        return 0;
+    }
+    av_channel_layout_uninit(&layout);
+
+    const int bps = av_get_bytes_per_sample(static_cast<AVSampleFormat>(m_oframe->format));
+    const int ch = m_oframe->ch_layout.nb_channels;
+    return m_oframe->linesize[0] / (bps * ch);
+}
+
 audio_decoder::buffer audio_decoder::decode(int samples) {
     while (m_use_flag.test_and_set(std::memory_order_acquire));
     int64_t delay = 0;
@@ -93,6 +138,28 @@ audio_decoder::buffer audio_decoder::decode(int samples) {
                 if (!swr_is_initialized(m_swr_ctx.get())) {
                     swr_config_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
                 }
+
+                // swr_convert_frame() uses out->nb_samples as the output
+                // capacity and overwrites it with the produced count on
+                // return. If the capacity is left at the previous call's
+                // output count, variable input frame sizes (OGG Vorbis:
+                // 64..8192 samples/frame) can leave it stuck below the
+                // steady-state need -- each call then only partially consumes
+                // its input and the remainder piles up inside swr's internal
+                // buffer indefinitely: the buffer keeps growing (repeated
+                // realloc + O(backlog) copies on every call -> CPU spikes in
+                // the decode thread, which the audio callback busy-waits on)
+                // and the audio latency creeps up. Restore the capacity so
+                // every call drains the buffered delay plus the whole input
+                // frame in one go.
+                int64_t needed = swr_get_delay(m_swr_ctx.get(), m_oframe->sample_rate)
+                        + (static_cast<int64_t>(m_iframe->nb_samples) * m_oframe->sample_rate
+                           + m_iframe->sample_rate - 1) / m_iframe->sample_rate
+                        + 32;
+                if (int capacity = ensure_out_capacity(needed)) {
+                    m_oframe->nb_samples = capacity;
+                }
+
                 error = swr_convert_frame(m_swr_ctx.get(), m_oframe.get(), m_iframe.get());
                 if (error == AVERROR_INPUT_CHANGED || error == AVERROR_OUTPUT_CHANGED) {
                     // Stream parameters changed mid-file: reconfigure once and retry.
@@ -132,6 +199,12 @@ audio_decoder::buffer audio_decoder::decode(int samples) {
         // Done before the caching step below so the flushed tail also honors
         // the "samples" contract (excess goes to the cache).
         while ((delay = swr_get_delay(m_swr_ctx.get(), m_oframe->sample_rate)) > 0) {
+            // Restore the output capacity (see the comment in the decode
+            // loop): nb_samples currently holds the previous call's produced
+            // count, which may be smaller than the delay still buffered.
+            if (int capacity = ensure_out_capacity(delay + 32)) {
+                m_oframe->nb_samples = capacity;
+            }
             if (swr_convert_frame(m_swr_ctx.get(), m_oframe.get(), nullptr) < 0) {
                 break;
             }

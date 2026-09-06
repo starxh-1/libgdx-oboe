@@ -36,6 +36,10 @@ public:
     bool is_eof() const;
 
 private:
+    /// Make sure m_oframe owns a buffer big enough for @p samples frames.
+    /// @return the actually allocated capacity in frames (>= samples, or 0 on failure)
+    int ensure_out_capacity(int64_t samples);
+
     std::vector<int16_t> m_buffer;
     std::vector<int16_t> m_cache;
 
