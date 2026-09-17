@@ -45,6 +45,13 @@ const std::vector<int16_t>& audio_player::generate_audio(uint32_t num_frames) {
     for (const auto &weak_track : m_tracks) {
         is_dirty |= weak_track.expired();
         if (auto track = weak_track.lock()) {
+            // Skip sources that cannot produce a sample this frame. Every wav in a
+            // BMS chart is decoded into its own soundpool and registered here, so
+            // m_tracks routinely holds thousands of entries while only a few dozen
+            // are audible at once. Without this check the loop clears m_buffer and
+            // runs a complete render pass for every idle pool -- on every callback,
+            // on the realtime audio thread, while holding m_rendering_flag.
+            if (!track->active()) continue;
             std::fill(m_buffer.begin(), m_buffer.end(), 0);
             track->render(m_buffer.data(), num_frames / m_engine.channels());
 

@@ -125,6 +125,29 @@ void soundpool::pan(long id, float value) {
     do_by_id(id, [value](auto sound) { sound->m_pan.pan(value); });
 }
 
+bool soundpool::active() const {
+    // Unsynchronised on purpose: this runs once per registered pool per callback
+    // (thousands of times), so taking m_rendering_flag here would eat most of
+    // what the skip saves. The read is safe because of how the writers are laid
+    // out -- both failure modes are benign:
+    //
+    //   m_sounds  -- render() (this thread) is the only writer that grows it.
+    //                The two cross-thread writers, stop() and stop(id), only
+    //                ever shrink it. Racing them can at worst report "not empty"
+    //                from a stale end pointer, which costs one extra render pass
+    //                (that pass re-checks under m_rendering_flag and finds
+    //                nothing). It can never report "empty" for a vector that
+    //                still holds voices, so a sounding pool is never skipped.
+    //   m_pending -- pushed by the UI thread. A read racing the push may say
+    //                "empty" and skip this callback, but the entry is never
+    //                dropped: the next callback sees it and consumes it.
+    //                Worst case is one note starting one buffer (~4ms) late.
+    //
+    // So: never loses audio, never grows without bound. It is deliberately NOT
+    // a substitute for the real check inside render().
+    return !m_sounds.empty() || !m_pending.empty();
+}
+
 void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
     static int limit_down = std::numeric_limits<int16_t>::min(),
             limit_up = std::numeric_limits<int16_t>::max();
@@ -133,16 +156,36 @@ void soundpool::render(int16_t *audio_data, uint32_t num_frames) {
         ;  // pure spin for lowest latency
     }
 
-    // Consume pending list from UI thread (lock-free, only we hold the flag)
-    if (!m_pending.empty()) {
+    // Consume the pending list handed over by the UI thread.
+    //
+    // play() pushes under m_pending_flag, so we must take that same flag before
+    // touching m_pending. Without it, a push_back that happens to reallocate the
+    // vector can free the storage we are iterating right now -- use-after-free
+    // inside the audio callback. (It is rare because clear() keeps the capacity,
+    // so it only bites when the list grows past its high-water mark; but a busy
+    // section with a few hundred notes a second does reach it.)
+    //
+    // Taken non-blocking on purpose: this is the realtime thread, so if the UI
+    // thread is mid-push we simply leave the list alone and pick it up on the
+    // next callback (~4ms later). Never spin here.
+    if (!m_pending.empty() &&
+        !m_pending_flag.test_and_set(std::memory_order_acquire)) {
         for (auto& s : m_pending) {
             m_sounds.push_back(std::move(s));
         }
         m_pending.clear();
+        m_pending_flag.clear(std::memory_order_release);
     }
 
     int prevaluated = 0;
-    m_sample_buffer.reserve(num_frames * m_channels + 16);
+    // resize 而不是 reserve:下面是从 begin() 起写 size * m_channels 个 float,
+    // 而 reserve 只给容量、size 仍然是 0 —— 对空 vector 解引用 begin() 是未定义行为。
+    // float 是 POD,reserve 出来的内存实践中能写,但没必要赌这个。
+    // 只在不够时扩:扩展才会填 0,之后每帧只是一次比较,不产生额外开销。
+    const size_t needed_samples = static_cast<size_t>(num_frames) * m_channels + 16;
+    if (m_sample_buffer.size() < needed_samples) {
+        m_sample_buffer.resize(needed_samples);
+    }
     for (auto it = m_sounds.begin(); it != m_sounds.end();) {
         if (!it->m_paused) {
             auto iter = std::next(m_pcm.cbegin(), it->m_cur_frame * m_channels);

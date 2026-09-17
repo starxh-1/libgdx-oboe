@@ -57,6 +57,9 @@ public:
 public:
     // renderable_audio interface
     void render(int16_t *stream, uint32_t frames);
+    /// True while the pool has voices to mix or waiting to be mixed in.
+    /// Lets audio_player skip this pool entirely on idle callbacks.
+    bool active() const override;
 
 private:
     struct sound {
