@@ -74,6 +74,15 @@ private:
     };
 
     sound gen_sound(float volume, float pan, float speed, bool loop);
+
+    /// Run @p callback on the voice with the given id, in **both** containers:
+    /// `m_pending` first (voices play() queued that the audio callback has not
+    /// promoted yet), then `m_sounds` (voices actually being mixed).
+    ///
+    /// @warning @p callback may only touch fields of the sound itself. It is
+    /// invoked for both containers, so it must not assume which vector the
+    /// iterator came from -- erasing needs that knowledge and therefore does
+    /// not go through here (see `stop(long)`).
     void do_by_id(long, const std::function<void(std::vector<sound>::iterator)> &);
 
     std::vector<sound> m_sounds;

@@ -27,14 +27,37 @@ soundpool::soundpool(const data_t &pcm, int8_t channels)
 
 void soundpool::do_by_id(long id, const std::function<void(
         std::vector<soundpool::sound>::iterator)> &callback) {
+    // 1) m_pending —— play() 里刚排进去、音频回调还没提升成 voice 的声音。
+    //    必须一起扫:play() 只往列表追加,真正的 voice 要等下一次回调才出现在
+    //    m_sounds 里(一个回调 ≈ 10ms),这期间只扫 m_sounds 就是"看不见它"。
+    //    两个 flag 分开拿、先释放再拿下一个,不与 render() 形成锁序反转
+    //    (render() 的顺序是 rendering → pending,且它对 pending 是非阻塞获取)。
+    while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    {
+        auto iter = std::find_if(m_pending.begin(), m_pending.end(),
+                                 [id](const soundpool::sound &sound) {
+                                     return sound.m_id == id;
+                                 });
+        if (iter != m_pending.end()) {
+            callback(iter);
+        }
+    }
+    m_pending_flag.clear(std::memory_order_release);
+
+    // 2) m_sounds —— 已经在混音的声音。
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
         ;  // pure spin for lowest latency
     }
-    auto iter = std::find_if(m_sounds.begin(), m_sounds.end(), [id](const soundpool::sound &sound) {
-        return sound.m_id == id;
-    });
-    if (iter != m_sounds.end()) {
-        callback(iter);
+    {
+        auto iter = std::find_if(m_sounds.begin(), m_sounds.end(),
+                                 [id](const soundpool::sound &sound) {
+                                     return sound.m_id == id;
+                                 });
+        if (iter != m_sounds.end()) {
+            callback(iter);
+        }
     }
     m_rendering_flag.clear(std::memory_order_release);
 }
@@ -65,6 +88,16 @@ long soundpool::play(float volume, float speed, float pan, bool loop) {
 }
 
 void soundpool::pause() {
+    // pending 也要盖到:pending 里的 voice 之后会被 render() 提升并直接出声,
+    // 只 pause m_sounds 的话它会"漏出来"。
+    while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    for (auto &sound : m_pending) {
+        sound.m_paused = true;
+    }
+    m_pending_flag.clear(std::memory_order_release);
+
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
         ;  // pure spin for lowest latency
     }
@@ -79,6 +112,14 @@ void soundpool::pause(long id) {
 }
 
 void soundpool::resume() {
+    while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    for (auto &sound : m_pending) {
+        sound.m_paused = false;
+    }
+    m_pending_flag.clear(std::memory_order_release);
+
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
         ;  // pure spin for lowest latency
     }
@@ -93,6 +134,14 @@ void soundpool::resume(long id) {
 }
 
 void soundpool::stop() {
+    // 顺序不能反:pending 先清、m_sounds 后清。反过来的话,两步之间被 render()
+    // 提升进 m_sounds 的 voice 会漏掉,stop 之后仍然出声。
+    while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    m_pending.clear();
+    m_pending_flag.clear(std::memory_order_release);
+
     while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
         ;  // pure spin for lowest latency
     }
@@ -101,9 +150,44 @@ void soundpool::stop() {
 }
 
 void soundpool::stop(long id) {
-    do_by_id(id, [&](auto sound) {
-        m_sounds.erase(sound);
-    });
+    // erase 需要知道迭代器属于哪个 vector,所以两个容器分开写,不能共用回调。
+    //
+    // pending 必须一起删 —— 这是 BMS「同一 #WAV 定义下标同时只响一个」语义的关键:
+    // AbstractAudioDriver.play0() 对同 channel 走 stop(wav, channel) → play(...),
+    // 而 channel = wavId*256 + pitch + 128 是按 #WAV 定义下标分的。play() 只是把
+    // 新 voice 排进 m_pending,等下一次音频回调才提升进 m_sounds(≈10ms 窗口);
+    // 两个"同一时刻"的 note 相隔只有微秒级,后一个的 stop 必然落在这个窗口里。
+    // 只扫 m_sounds 就找不到前一个 voice → 两个一起出声(听感 = 200% 音量)。
+    //
+    // 注意:#WAV4D 与 #WAV4E 这种不同定义、同一音频文件的情况 id 不同、channel
+    // 不同,本来就该同时出声 —— 所以这里只能按 id 判,不能按文件路径去重。
+    while (m_pending_flag.test_and_set(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+    {
+        auto iter = std::find_if(m_pending.begin(), m_pending.end(),
+                                 [id](const soundpool::sound &sound) {
+                                     return sound.m_id == id;
+                                 });
+        if (iter != m_pending.end()) {
+            m_pending.erase(iter);
+        }
+    }
+    m_pending_flag.clear(std::memory_order_release);
+
+    while (m_rendering_flag.test_and_set(std::memory_order_acquire)) {
+        ;  // pure spin for lowest latency
+    }
+    {
+        auto iter = std::find_if(m_sounds.begin(), m_sounds.end(),
+                                 [id](const soundpool::sound &sound) {
+                                     return sound.m_id == id;
+                                 });
+        if (iter != m_sounds.end()) {
+            m_sounds.erase(iter);
+        }
+    }
+    m_rendering_flag.clear(std::memory_order_release);
 }
 
 void soundpool::volume(long id, float value) {
