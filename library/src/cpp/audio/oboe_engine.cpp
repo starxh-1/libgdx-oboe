@@ -222,10 +222,45 @@ void oboe_engine::resume() {
 
         debug("oboe_engine::resume. State: {}", oboe::convertToText(stream->getState()));
 
-        if (check(stream->requestStart(), "Error starting stream: {}")) {
+        // 🔴 二重 resume 対策（OpenSL ES への誤回退の根因。詳細:
+        // docs/audio-aaudio-opensl-fallback.md）。
+        //
+        // get_or_create_shared_player() は生成直後に resume() を 1 回呼び
+        // （oboe_audio.cpp:28）、その呼び元 OBOEAUDIO_METHOD(resume) がさらに
+        // もう 1 回 resume() を呼ぶ（oboe_audio.cpp:142）。2 回目の
+        // requestStart() はまだ STARTING のストリームを叩いて
+        // ErrorInvalidState (-895) を返すが、これは「起動処理中」という
+        // 一過性の状態であって AAudio バックエンドの故障ではない。
+        // これを失敗扱いすると下の fallback latch が誤発火し、正常な端末でも
+        // プロセス全体が永久に OpenSL ES に降格してしまう。
+        const auto state_before = stream->getState();
+        if (state_before == oboe::StreamState::Starting
+                || state_before == oboe::StreamState::Started) {
+            debug("resume: stream already {} -- treating as success.",
+                  oboe::convertToText(state_before));
             m_is_playing = true;
             return;
         }
+
+        const oboe::Result start_result = stream->requestStart();
+        if (start_result == oboe::Result::OK) {
+            m_is_playing = true;
+            return;
+        }
+
+        // 上の state チェックと requestStart() の間で、別スレッドの resume が
+        // ストリームを STARTING/STARTED に変えた可能性がある。同じ一過性の
+        // 状態なので fallback latch には進めない。
+        const auto state_now = stream->getState();
+        if (state_now == oboe::StreamState::Starting
+                || state_now == oboe::StreamState::Started) {
+            debug("resume: requestStart() returned {} but stream is now {} -- treating as success.",
+                  oboe::convertToText(start_result), oboe::convertToText(state_now));
+            m_is_playing = true;
+            return;
+        }
+
+        check(start_result, "Error starting stream: {}");
 
         // requestStart() failed. Latch the fallback; exchange() returns the
         // previous value, so if it was already true we are on OpenSL ES already
